@@ -71,6 +71,9 @@ class CachedParser:
 _parser_cache: dict[str, CachedParser] = {}
 _CACHE_MAX_SIZE = 10  # Maximum number of cached parsers
 
+# Cache for resolved paths (sandbox path -> host path)
+_path_resolution_cache: dict[str, Path] = {}
+
 
 def resolve_file_path(file_path: str) -> Path:
     """
@@ -85,6 +88,16 @@ def resolve_file_path(file_path: str) -> Path:
     Raises:
         FileNotFoundError: If file cannot be found in any location
     """
+    # Check path resolution cache first (for sandbox paths)
+    if file_path in _path_resolution_cache:
+        cached_path = _path_resolution_cache[file_path]
+        if cached_path.exists():
+            logger.info(f"Path cache hit: {file_path} -> {cached_path}")
+            return cached_path
+        else:
+            # Cached path no longer exists, remove from cache
+            del _path_resolution_cache[file_path]
+
     logger.info(f"resolve_file_path called with: {file_path}")
 
     path = Path(file_path)
@@ -135,8 +148,11 @@ def resolve_file_path(file_path: str) -> Path:
             pattern = f"**/{parent_name}/{filename}" if parent_name else f"**/{filename}"
             for match in root.glob(pattern):
                 if match.is_file():
-                    logger.info(f"Found via glob: {match}")
-                    return match.resolve()
+                    resolved = match.resolve()
+                    logger.info(f"Found via glob: {resolved}")
+                    # Cache the resolution for future calls
+                    _path_resolution_cache[file_path] = resolved
+                    return resolved
         except (PermissionError, OSError) as e:
             logger.debug(f"Glob search in {root} failed: {e}")
 
