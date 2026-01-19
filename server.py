@@ -74,10 +74,14 @@ _CACHE_MAX_SIZE = 10  # Maximum number of cached parsers
 
 def resolve_file_path(file_path: str) -> Path:
     """
-    Resolve a file path, trying multiple locations for sandbox compatibility.
+    Resolve a file path, handling Cowork sandbox path translation.
+
+    Cowork passes sandbox paths like /sessions/xxx/mnt/folder/file.sdlxliff
+    but MCP server runs on HOST where those don't exist. We extract the
+    filename and search for it in common user directories.
 
     Args:
-        file_path: The file path to resolve
+        file_path: The file path to resolve (may be sandbox or host path)
 
     Returns:
         Resolved Path object
@@ -85,25 +89,58 @@ def resolve_file_path(file_path: str) -> Path:
     Raises:
         FileNotFoundError: If file cannot be found in any location
     """
-    # Try paths in order of likelihood
-    candidates = [
-        Path(file_path),  # As-is
-        Path("/mnt") / file_path.lstrip("/"),  # Under /mnt
-        Path("/mnt") / Path(file_path).name,  # Just filename under /mnt
-        Path.cwd() / file_path,  # Relative to CWD
-        Path.cwd() / Path(file_path).name,  # Just filename in CWD
-    ]
+    path = Path(file_path)
+    filename = path.name
 
-    # Also try the path if it looks like it should be under /mnt
-    if file_path.startswith("/Users/") or file_path.startswith("/home/"):
-        # Convert host path to sandbox path
-        candidates.insert(1, Path("/mnt") / Path(file_path).relative_to(Path(file_path).parts[0] + "/" + Path(file_path).parts[1] + "/" + Path(file_path).parts[2]))
+    # Extract parent folder name (e.g., "ru-RU" from the path)
+    parent_name = path.parent.name if path.parent.name and path.parent.name != "mnt" else None
 
+    logger.info(f"Resolving: {file_path}, filename={filename}, parent={parent_name}")
+
+    # Try direct path first
+    candidates = [path]
+
+    # If it's a sandbox path, search common user directories
+    if "/sessions/" in file_path or "/mnt/" in file_path or not path.exists():
+        home = Path.home()
+        search_roots = [
+            home / "Documents",
+            home / "Downloads",
+            home / "Desktop",
+            home,
+            Path.cwd(),
+        ]
+
+        for root in search_roots:
+            if not root.exists():
+                continue
+            # Try with parent folder name if we have it
+            if parent_name:
+                candidates.append(root / parent_name / filename)
+                # Also search recursively for parent/filename pattern
+                try:
+                    for match in root.rglob(f"{parent_name}/{filename}"):
+                        candidates.append(match)
+                        break  # Take first match
+                except (PermissionError, OSError):
+                    pass
+            # Try just the filename
+            candidates.append(root / filename)
+            # Search for file recursively (limited depth)
+            try:
+                for match in root.rglob(filename):
+                    candidates.append(match)
+                    break  # Take first match
+            except (PermissionError, OSError):
+                pass
+
+    # Try each candidate
     tried = []
     for candidate in candidates:
         try:
             resolved = candidate.resolve()
-            tried.append(str(resolved))
+            if str(resolved) not in tried:
+                tried.append(str(resolved))
             if resolved.exists() and resolved.is_file():
                 logger.info(f"Resolved {file_path} -> {resolved}")
                 return resolved
@@ -111,7 +148,7 @@ def resolve_file_path(file_path: str) -> Path:
             logger.debug(f"Path candidate {candidate} failed: {e}")
 
     # Not found - raise with details
-    raise FileNotFoundError(f"File not found: {file_path}\nTried: {tried}\nCWD: {os.getcwd()}")
+    raise FileNotFoundError(f"File not found: {file_path}\nSearched for: {filename}\nTried: {tried[:10]}\nCWD: {os.getcwd()}")
 
 
 def get_parser(file_path: str) -> SDLXLIFFParser:
@@ -398,47 +435,56 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             logger.info(f"find_sdlxliff_files: directory={directory}, recursive={recursive}")
             logger.info(f"CWD: {os.getcwd()}")
 
-            # Try multiple possible paths (for sandbox compatibility)
-            search_paths = [
-                Path(directory),
-                Path("/mnt"),  # Cowork sandbox mount point
-                Path("/mnt") / directory.lstrip("/"),
-                Path.cwd(),
-                Path.cwd() / directory,
-            ]
+            # Extract folder name from sandbox path (e.g., "ru-RU" from /sessions/xxx/mnt/ru-RU)
+            dir_path_obj = Path(directory)
+            folder_name = dir_path_obj.name if dir_path_obj.name and dir_path_obj.name != "mnt" else None
 
-            # Find first existing directory
-            dir_path = None
-            tried_paths = []
-            for try_path in search_paths:
-                try:
-                    resolved = try_path.resolve()
-                    tried_paths.append(str(resolved))
-                    if resolved.exists() and resolved.is_dir():
-                        dir_path = resolved
-                        logger.info(f"Using directory: {dir_path}")
-                        break
-                except Exception as e:
-                    logger.debug(f"Path {try_path} failed: {e}")
+            # Search in user directories (since sandbox paths don't exist on host)
+            home = Path.home()
+            search_dirs = []
 
-            if dir_path is None:
-                return [TextContent(
-                    type="text",
-                    text=json.dumps({
-                        "error": "No valid directory found",
-                        "tried_paths": tried_paths,
-                        "cwd": os.getcwd(),
-                        "files": []
-                    }, indent=2, ensure_ascii=False)
-                )]
-
-            logger.info(f"Searching in: {dir_path}")
-
-            # Find SDLXLIFF files
-            if recursive:
-                files = list(dir_path.rglob("*.sdlxliff"))
+            # If it's a sandbox path, search common user directories
+            if "/sessions/" in directory or not Path(directory).exists():
+                search_dirs = [
+                    home / "Documents",
+                    home / "Downloads",
+                    home / "Desktop",
+                ]
+                # If we know the folder name, prioritize paths containing it
+                if folder_name:
+                    for base in search_dirs.copy():
+                        if base.exists():
+                            # Add specific folder path
+                            specific = base / folder_name
+                            if specific.exists():
+                                search_dirs.insert(0, specific)
             else:
-                files = list(dir_path.glob("*.sdlxliff"))
+                # Direct path exists
+                search_dirs = [Path(directory).resolve()]
+
+            logger.info(f"Search dirs: {search_dirs}, folder_name: {folder_name}")
+
+            # Search for SDLXLIFF files in these directories
+            files = []
+            searched_dirs = []
+            for search_dir in search_dirs:
+                if not search_dir.exists() or not search_dir.is_dir():
+                    continue
+                searched_dirs.append(str(search_dir))
+                try:
+                    if recursive:
+                        found = list(search_dir.rglob("*.sdlxliff"))
+                    else:
+                        found = list(search_dir.glob("*.sdlxliff"))
+                    files.extend(found)
+                    logger.info(f"Found {len(found)} files in {search_dir}")
+                    if found:
+                        break  # Stop after finding files in first directory
+                except (PermissionError, OSError) as e:
+                    logger.warning(f"Cannot search {search_dir}: {e}")
+
+            # Deduplicate
+            files = list(set(files))
 
             logger.info(f"Found {len(files)} SDLXLIFF files")
 
@@ -463,7 +509,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     })
 
             result = {
-                "directory": str(dir_path),
+                "searched_directories": searched_dirs,
                 "recursive": recursive,
                 "count": len(file_list),
                 "files": file_list,
