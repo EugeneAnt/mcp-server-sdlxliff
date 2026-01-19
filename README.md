@@ -1,6 +1,16 @@
 # mcp-server-sdlxliff
 
-A Model Context Protocol (MCP) server for parsing, reading, and modifying SDLXLIFF translation files. Enables AI assistants like Claude to work directly with SDL Trados Studio translation files.
+A Model Context Protocol (MCP) server for parsing, reading, and modifying SDLXLIFF translation files. Enables Claude to review and correct SDL Trados Studio translation files directly.
+
+## Compatibility
+
+This MCP server is designed for **Claude Cowork** (recommended):
+
+| Product | Works? | Notes |
+|---------|--------|-------|
+| **Claude Cowork** | Yes | Primary use case. Add a folder with SDLXLIFF files and Claude can discover, read, modify, and save them. |
+| **Claude Desktop (chat)** | Limited | MCP tools available, but no folder context. You must provide exact file paths manually. |
+| **Claude.ai (web)** | No | Web interface doesn't support MCP servers. |
 
 ## Features
 
