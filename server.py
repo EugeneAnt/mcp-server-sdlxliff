@@ -23,17 +23,38 @@ import logging
 from sdlxliff_parser import SDLXLIFFParser
 
 
-# Set up logging with cross-platform temp directory
-log_path = Path(tempfile.gettempdir()) / 'sdlxliff_mcp_server.log'
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(log_path),
-        logging.StreamHandler()
+# Set up logging - try multiple locations for sandbox compatibility
+def setup_logging():
+    """Set up logging to multiple locations for debugging."""
+    log_locations = [
+        Path("/mnt/sdlxliff_debug.log"),  # Cowork sandbox mounted folder
+        Path.home() / "sdlxliff_debug.log",  # User home
+        Path(tempfile.gettempdir()) / "sdlxliff_mcp_server.log",  # Temp dir
+        Path("sdlxliff_debug.log"),  # Current working directory
     ]
-)
-logger = logging.getLogger("sdlxliff-server")
+
+    handlers = [logging.StreamHandler(sys.stderr)]  # Always log to stderr
+
+    for log_path in log_locations:
+        try:
+            handler = logging.FileHandler(str(log_path), mode='a')
+            handlers.append(handler)
+            break  # Use first writable location
+        except (PermissionError, OSError):
+            continue
+
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=handlers
+    )
+    return logging.getLogger("sdlxliff-server")
+
+logger = setup_logging()
+logger.info(f"=== MCP Server Starting ===")
+logger.info(f"CWD: {os.getcwd()}")
+logger.info(f"Python: {sys.executable}")
+logger.info(f"Platform: {sys.platform}")
 
 # Create the MCP server instance
 app = Server("sdlxliff-server")
@@ -335,28 +356,41 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             logger.info(f"find_sdlxliff_files: directory={directory}, recursive={recursive}")
             logger.info(f"CWD: {os.getcwd()}")
 
-            # Handle directory path
-            dir_path = Path(directory).resolve()
-            logger.info(f"Resolved directory: {dir_path}")
+            # Try multiple possible paths (for sandbox compatibility)
+            search_paths = [
+                Path(directory),
+                Path("/mnt"),  # Cowork sandbox mount point
+                Path("/mnt") / directory.lstrip("/"),
+                Path.cwd(),
+                Path.cwd() / directory,
+            ]
 
-            if not dir_path.exists():
+            # Find first existing directory
+            dir_path = None
+            tried_paths = []
+            for try_path in search_paths:
+                try:
+                    resolved = try_path.resolve()
+                    tried_paths.append(str(resolved))
+                    if resolved.exists() and resolved.is_dir():
+                        dir_path = resolved
+                        logger.info(f"Using directory: {dir_path}")
+                        break
+                except Exception as e:
+                    logger.debug(f"Path {try_path} failed: {e}")
+
+            if dir_path is None:
                 return [TextContent(
                     type="text",
                     text=json.dumps({
-                        "error": f"Directory not found: {dir_path}",
+                        "error": "No valid directory found",
+                        "tried_paths": tried_paths,
                         "cwd": os.getcwd(),
                         "files": []
-                    }, indent=2)
+                    }, indent=2, ensure_ascii=False)
                 )]
 
-            if not dir_path.is_dir():
-                return [TextContent(
-                    type="text",
-                    text=json.dumps({
-                        "error": f"Path is not a directory: {dir_path}",
-                        "files": []
-                    }, indent=2)
-                )]
+            logger.info(f"Searching in: {dir_path}")
 
             # Find SDLXLIFF files
             if recursive:
