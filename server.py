@@ -445,19 +445,33 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
             # If it's a sandbox path, search common user directories
             if "/sessions/" in directory or not Path(directory).exists():
-                search_dirs = [
+                base_dirs = [
                     home / "Documents",
                     home / "Downloads",
                     home / "Desktop",
                 ]
-                # If we know the folder name, prioritize paths containing it
+
+                # If we know the folder name, ONLY search for that specific folder
                 if folder_name:
-                    for base in search_dirs.copy():
-                        if base.exists():
-                            # Add specific folder path
-                            specific = base / folder_name
-                            if specific.exists():
-                                search_dirs.insert(0, specific)
+                    for base in base_dirs:
+                        if not base.exists():
+                            continue
+                        # Try direct subfolder
+                        specific = base / folder_name
+                        if specific.exists() and specific.is_dir():
+                            search_dirs.append(specific)
+                        # Also search for folder recursively (limited)
+                        try:
+                            for match in base.glob(f"**/{folder_name}"):
+                                if match.is_dir() and match not in search_dirs:
+                                    search_dirs.append(match)
+                        except (PermissionError, OSError):
+                            pass
+
+                # If no specific folders found, fall back to base dirs (but warn)
+                if not search_dirs:
+                    logger.warning(f"Could not find folder '{folder_name}', searching base dirs")
+                    search_dirs = base_dirs
             else:
                 # Direct path exists
                 search_dirs = [Path(directory).resolve()]
