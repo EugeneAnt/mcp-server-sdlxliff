@@ -1,0 +1,14 @@
+[project]
+name = "ccdesktopxlifftool"
+version = "0.1.0"
+description = "MCP server for parsing, reading and writing SDLXLIFF files"
+requires-python = ">=3.13"
+dependencies = [
+    "lxml>=5.1.0",
+    "mcp>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+]

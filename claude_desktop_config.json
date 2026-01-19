@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "sdlxliff": {
+      "command": "/Users/yevgeniyantonov/PycharmProjects/CCDesktopXliffTool/.venv/bin/python3",
+      "args": [
+        "/Users/yevgeniyantonov/PycharmProjects/CCDesktopXliffTool/server.py"
+      ]
+    }
+  }
+}
