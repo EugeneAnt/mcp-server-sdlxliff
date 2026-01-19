@@ -299,79 +299,35 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="update_sdlxliff_segment",
             description=(
-                "Update a segment's target text and optionally its status. "
-                "Use this to modify translations. Note: Changes are made in memory; "
-                "you must call save_sdlxliff to persist changes."
+                "Update a segment's target text and set status to RejectedTranslation. "
+                "Use this to correct translations. The segment_id is the mrk mid (e.g., '1', '2', '42'). "
+                "Changes are made in memory; you must call save_sdlxliff to persist changes."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "file_path": {
                         "type": "string",
-                        "description": "Path to the SDLXLIFF file (can be relative or absolute)",
+                        "description": "Path to the SDLXLIFF file",
                     },
                     "segment_id": {
                         "type": "string",
-                        "description": "The segment ID to update",
+                        "description": "The segment ID (mrk mid) to update",
                     },
                     "target_text": {
                         "type": "string",
                         "description": "New target text for the segment",
-                    },
-                    "status": {
-                        "type": "string",
-                        "description": (
-                            "SDL confirmation level. Valid values: "
-                            "'Draft', 'Translated', 'RejectedTranslation', "
-                            "'ApprovedTranslation', 'RejectedSignOff', 'ApprovedSignOff'"
-                        ),
-                        "default": "RejectedTranslation",
                     },
                 },
                 "required": ["file_path", "segment_id", "target_text"],
             },
         ),
         Tool(
-            name="reject_sdlxliff_segment",
-            description=(
-                "Mark a segment as rejected and optionally update the target text. "
-                "This is commonly used during translation review when a translation needs to be redone. "
-                "By default, sets SDL confirmation level to 'RejectedTranslation'."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "file_path": {
-                        "type": "string",
-                        "description": "Path to the SDLXLIFF file (can be relative or absolute)",
-                    },
-                    "segment_id": {
-                        "type": "string",
-                        "description": "The segment ID to reject",
-                    },
-                    "target_text": {
-                        "type": "string",
-                        "description": "Optional corrected target text",
-                    },
-                    "status": {
-                        "type": "string",
-                        "description": (
-                            "SDL confirmation level. Valid values: "
-                            "'Draft', 'Translated', 'RejectedTranslation', "
-                            "'ApprovedTranslation', 'RejectedSignOff', 'ApprovedSignOff'"
-                        ),
-                        "default": "RejectedTranslation",
-                    },
-                },
-                "required": ["file_path", "segment_id"],
-            },
-        ),
-        Tool(
             name="save_sdlxliff",
             description=(
                 "Save changes made to an SDLXLIFF file. All modifications from "
-                "update_sdlxliff_segment and reject_sdlxliff_segment are kept in memory "
-                "until this tool is called. Can optionally save to a different file path."
+                "update_sdlxliff_segment are kept in memory until this tool is called. "
+                "Can optionally save to a different file path."
             ),
             inputSchema={
                 "type": "object",
@@ -459,16 +415,15 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             file_path = arguments["file_path"]
             segment_id = arguments["segment_id"]
             target_text = arguments["target_text"]
-            status = arguments.get("status", "RejectedTranslation")
 
             parser = get_parser(file_path)
-            success = parser.update_segment(segment_id, target_text, status)
+            success = parser.update_segment(segment_id, target_text)
 
             if success:
                 return [
                     TextContent(
                         type="text",
-                        text=f"Successfully updated segment '{segment_id}'. "
+                        text=f"Successfully updated segment '{segment_id}' (status set to RejectedTranslation). "
                              f"Remember to call save_sdlxliff to persist changes.",
                     )
                 ]
@@ -477,37 +432,6 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     TextContent(
                         type="text",
                         text=f"Failed to update segment '{segment_id}'. Segment not found.",
-                    )
-                ]
-
-        elif name == "reject_sdlxliff_segment":
-            file_path = arguments["file_path"]
-            segment_id = arguments["segment_id"]
-            target_text = arguments.get("target_text")
-            status = arguments.get("status", "RejectedTranslation")
-
-            parser = get_parser(file_path)
-
-            if target_text:
-                # Update both text and status
-                success = parser.update_segment(segment_id, target_text, status)
-            else:
-                # Just update status
-                success = parser.set_segment_status(segment_id, status)
-
-            if success:
-                msg = f"Successfully rejected segment '{segment_id}' "
-                msg += f"(status set to '{status}')"
-                if target_text:
-                    msg += " and updated target text"
-                msg += ". Remember to call save_sdlxliff to persist changes."
-
-                return [TextContent(type="text", text=msg)]
-            else:
-                return [
-                    TextContent(
-                        type="text",
-                        text=f"Failed to reject segment '{segment_id}'. Segment not found.",
                     )
                 ]
 
