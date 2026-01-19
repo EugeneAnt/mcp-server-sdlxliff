@@ -1,6 +1,6 @@
 [project]
 name = "mcp-server-sdlxliff"
-version = "0.3.0"
+version = "0.4.0"
 description = "MCP server for parsing, reading, and modifying SDLXLIFF translation files (SDL Trados Studio format)"
 readme = "README.md"
 license = { text = "MIT" }
