@@ -246,44 +246,22 @@ async def read_resource(uri: str) -> str:
 async def list_tools() -> list[Tool]:
     """List available SDLXLIFF tools."""
     return [
-        Tool(
-            name="find_sdlxliff_files",
-            description=(
-                "IMPORTANT: Use this tool FIRST to find SDLXLIFF files before using other tools. "
-                "Searches for .sdlxliff files in the specified directory. "
-                "Returns file paths that can be used with read_sdlxliff and other tools. "
-                "DO NOT write Python code to find or parse SDLXLIFF files - always use these dedicated tools."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "directory": {
-                        "type": "string",
-                        "description": "Directory to search (default: current directory). Use '.' for current folder.",
-                        "default": ".",
-                    },
-                    "recursive": {
-                        "type": "boolean",
-                        "description": "Search subdirectories recursively (default: true)",
-                        "default": True,
-                    },
-                },
-            },
-        ),
+        # NOTE: No find_sdlxliff_files tool - let Cowork's built-in file tools
+        # discover files first, then use these tools with the real host paths.
         Tool(
             name="read_sdlxliff",
             description=(
                 "Extract all translation segments from an SDLXLIFF file. "
                 "Returns segment IDs, source text, target text, status, and locked state. "
                 "ALWAYS use this tool to read SDLXLIFF files - DO NOT write Python code to parse XML. "
-                "Use find_sdlxliff_files first to get the file path."
+                "Use Cowork's built-in file tools to find the .sdlxliff file path first."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "file_path": {
                         "type": "string",
-                        "description": "Full path to the SDLXLIFF file (from find_sdlxliff_files)",
+                        "description": "Full path to the SDLXLIFF file",
                     },
                 },
                 "required": ["file_path"],
@@ -428,114 +406,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     logger.info(f"call_tool: {name} with arguments: {arguments}")
 
     try:
-        if name == "find_sdlxliff_files":
-            directory = arguments.get("directory", ".")
-            recursive = arguments.get("recursive", True)
-
-            logger.info(f"find_sdlxliff_files: directory={directory}, recursive={recursive}")
-            logger.info(f"CWD: {os.getcwd()}")
-
-            # Extract folder name from sandbox path (e.g., "ru-RU" from /sessions/xxx/mnt/ru-RU)
-            dir_path_obj = Path(directory)
-            folder_name = dir_path_obj.name if dir_path_obj.name and dir_path_obj.name != "mnt" else None
-
-            # Search in user directories (since sandbox paths don't exist on host)
-            home = Path.home()
-            search_dirs = []
-
-            # If it's a sandbox path, search common user directories
-            if "/sessions/" in directory or not Path(directory).exists():
-                base_dirs = [
-                    home / "Documents",
-                    home / "Downloads",
-                    home / "Desktop",
-                ]
-
-                # If we know the folder name, ONLY search for that specific folder
-                if folder_name:
-                    for base in base_dirs:
-                        if not base.exists():
-                            continue
-                        # Try direct subfolder
-                        specific = base / folder_name
-                        if specific.exists() and specific.is_dir():
-                            search_dirs.append(specific)
-                        # Also search for folder recursively (limited)
-                        try:
-                            for match in base.glob(f"**/{folder_name}"):
-                                if match.is_dir() and match not in search_dirs:
-                                    search_dirs.append(match)
-                        except (PermissionError, OSError):
-                            pass
-
-                # If no specific folders found, fall back to base dirs (but warn)
-                if not search_dirs:
-                    logger.warning(f"Could not find folder '{folder_name}', searching base dirs")
-                    search_dirs = base_dirs
-            else:
-                # Direct path exists
-                search_dirs = [Path(directory).resolve()]
-
-            logger.info(f"Search dirs: {search_dirs}, folder_name: {folder_name}")
-
-            # Search for SDLXLIFF files in these directories
-            files = []
-            searched_dirs = []
-            for search_dir in search_dirs:
-                if not search_dir.exists() or not search_dir.is_dir():
-                    continue
-                searched_dirs.append(str(search_dir))
-                try:
-                    if recursive:
-                        found = list(search_dir.rglob("*.sdlxliff"))
-                    else:
-                        found = list(search_dir.glob("*.sdlxliff"))
-                    files.extend(found)
-                    logger.info(f"Found {len(found)} files in {search_dir}")
-                    if found:
-                        break  # Stop after finding files in first directory
-                except (PermissionError, OSError) as e:
-                    logger.warning(f"Cannot search {search_dir}: {e}")
-
-            # Deduplicate
-            files = list(set(files))
-
-            logger.info(f"Found {len(files)} SDLXLIFF files")
-
-            # Build file list with safe error handling for Unicode filenames
-            file_list = []
-            for file in sorted(files):
-                try:
-                    file_info = {
-                        "path": str(file),
-                        "name": file.name,
-                        "size": file.stat().st_size,
-                    }
-                    file_list.append(file_info)
-                except (OSError, UnicodeError) as e:
-                    logger.warning(f"Error accessing file {file}: {e}")
-                    # Still include the file path even if we can't get stats
-                    file_list.append({
-                        "path": str(file),
-                        "name": file.name,
-                        "size": -1,
-                        "error": str(e)
-                    })
-
-            result = {
-                "searched_directories": searched_dirs,
-                "recursive": recursive,
-                "count": len(file_list),
-                "files": file_list,
-                "hint": "Use read_sdlxliff with a file path from this list to extract segments"
-            }
-
-            return [TextContent(
-                type="text",
-                text=json.dumps(result, indent=2, ensure_ascii=False)
-            )]
-
-        elif name == "read_sdlxliff":
+        if name == "read_sdlxliff":
             file_path = arguments["file_path"]
             logger.info(f"read_sdlxliff: file_path={file_path}")
             logger.info(f"CWD: {os.getcwd()}")
