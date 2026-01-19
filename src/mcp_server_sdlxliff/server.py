@@ -349,9 +349,10 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="get_sdlxliff_statistics",
             description=(
-                "Get statistics about an SDLXLIFF file, including total segment count, "
-                "counts by status, and number of locked segments. Useful for getting "
-                "an overview of translation progress."
+                "Get statistics and metadata about an SDLXLIFF file. Returns source/target "
+                "language codes (e.g., 'en-US' -> 'de-DE'), total segment count, counts by "
+                "status, and locked segment count. Call this first to understand the file "
+                "before reading segments."
             ),
             inputSchema={
                 "type": "object",

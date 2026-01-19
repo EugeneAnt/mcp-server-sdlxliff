@@ -401,6 +401,28 @@ class SDLXLIFFParser:
             'locked': locked,
         }
 
+    def get_file_metadata(self) -> Dict[str, Any]:
+        """
+        Extract file-level metadata from the SDLXLIFF file.
+
+        Returns:
+            Dictionary with metadata:
+            - source_language: Source language code (e.g., 'en-US')
+            - target_language: Target language code (e.g., 'de-DE')
+        """
+        metadata: Dict[str, Any] = {
+            'source_language': None,
+            'target_language': None,
+        }
+
+        # Find the file element (there's usually one per SDLXLIFF)
+        file_elem = self.root.find('.//xliff:file', self.namespaces)
+        if file_elem is not None:
+            metadata['source_language'] = file_elem.get('source-language')
+            metadata['target_language'] = file_elem.get('target-language')
+
+        return metadata
+
     def get_statistics(self) -> Dict[str, Any]:
         """
         Get statistics about the SDLXLIFF file.
@@ -409,10 +431,15 @@ class SDLXLIFFParser:
 
         Returns:
             Dictionary with statistics:
+            - source_language: Source language code
+            - target_language: Target language code
             - total_segments: Total number of mrk segments
             - status_counts: Count of segments by SDL confirmation level
             - locked_count: Number of locked segments
         """
+        # Get file metadata first
+        metadata = self.get_file_metadata()
+
         status_counts: Dict[str, int] = {}
         locked_count = 0
         total = 0
@@ -429,6 +456,8 @@ class SDLXLIFFParser:
                 locked_count += 1
 
         return {
+            'source_language': metadata['source_language'],
+            'target_language': metadata['target_language'],
             'total_segments': total,
             'status_counts': status_counts,
             'locked_count': locked_count,
