@@ -353,19 +353,39 @@ class SDLXLIFFParser:
         """
         Save the modified SDLXLIFF file.
 
+        Preserves original file characteristics:
+        - UTF-8 BOM if present in original
+        - Original XML declaration format
+        - Minimal structure changes
+
         Args:
             output_path: Optional output path. If None, overwrites the original file.
         """
         if output_path is None:
             output_path = str(self.file_path)
 
-        # Write with proper XML declaration and encoding
-        self.tree.write(
-            output_path,
-            encoding='utf-8',
-            xml_declaration=True,
-            pretty_print=False,  # Don't change formatting
+        # Check if original file had BOM
+        has_bom = False
+        try:
+            with open(self.file_path, 'rb') as f:
+                has_bom = f.read(3) == b'\xef\xbb\xbf'
+        except (IOError, OSError):
+            pass
+
+        # Generate XML content
+        xml_content = etree.tostring(
+            self.root,
+            encoding='unicode',
+            pretty_print=False,
         )
+
+        # Write with original XML declaration format and BOM
+        with open(output_path, 'wb') as f:
+            if has_bom:
+                f.write(b'\xef\xbb\xbf')
+            # Use original declaration format (double quotes, lowercase)
+            f.write(b'<?xml version="1.0" encoding="utf-8"?>')
+            f.write(xml_content.encode('utf-8'))
 
     def get_segment_by_id(self, segment_id: str) -> Optional[Dict[str, Any]]:
         """
