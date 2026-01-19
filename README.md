@@ -10,7 +10,7 @@ This MCP server is designed for **Claude Cowork** (recommended):
 |---------|--------|-------|
 | **Claude Cowork** | Yes | Primary use case. Add a folder with SDLXLIFF files and Claude can discover, read, modify, and save them. |
 | **Claude Desktop (chat)** | Limited | MCP tools available, but no folder context. You must provide exact file paths manually. |
-| **Claude.ai (web)** | No | Web interface doesn't support MCP servers. |
+| **Claude.ai (web)** | No | Web interface supports connectors, but they don't provide local filesystem access. |
 
 ## Features
 
