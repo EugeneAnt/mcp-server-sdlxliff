@@ -28,3 +28,6 @@ Thumbs.db
 
 # Sample files (may contain sensitive client data)
 sample/
+
+# Claude Code local config
+CLAUDE.md
