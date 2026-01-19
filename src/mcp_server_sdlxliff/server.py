@@ -20,7 +20,7 @@ from mcp.types import Tool, TextContent, Resource
 from mcp.server.stdio import stdio_server
 import logging
 
-from sdlxliff_parser import SDLXLIFFParser
+from .parser import SDLXLIFFParser
 
 
 # Set up logging - try multiple locations for sandbox compatibility

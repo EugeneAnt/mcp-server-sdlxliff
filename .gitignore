@@ -25,3 +25,6 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+
+# Sample files (may contain sensitive client data)
+sample/
