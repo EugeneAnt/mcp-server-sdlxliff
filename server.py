@@ -72,6 +72,48 @@ _parser_cache: dict[str, CachedParser] = {}
 _CACHE_MAX_SIZE = 10  # Maximum number of cached parsers
 
 
+def resolve_file_path(file_path: str) -> Path:
+    """
+    Resolve a file path, trying multiple locations for sandbox compatibility.
+
+    Args:
+        file_path: The file path to resolve
+
+    Returns:
+        Resolved Path object
+
+    Raises:
+        FileNotFoundError: If file cannot be found in any location
+    """
+    # Try paths in order of likelihood
+    candidates = [
+        Path(file_path),  # As-is
+        Path("/mnt") / file_path.lstrip("/"),  # Under /mnt
+        Path("/mnt") / Path(file_path).name,  # Just filename under /mnt
+        Path.cwd() / file_path,  # Relative to CWD
+        Path.cwd() / Path(file_path).name,  # Just filename in CWD
+    ]
+
+    # Also try the path if it looks like it should be under /mnt
+    if file_path.startswith("/Users/") or file_path.startswith("/home/"):
+        # Convert host path to sandbox path
+        candidates.insert(1, Path("/mnt") / Path(file_path).relative_to(Path(file_path).parts[0] + "/" + Path(file_path).parts[1] + "/" + Path(file_path).parts[2]))
+
+    tried = []
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+            tried.append(str(resolved))
+            if resolved.exists() and resolved.is_file():
+                logger.info(f"Resolved {file_path} -> {resolved}")
+                return resolved
+        except Exception as e:
+            logger.debug(f"Path candidate {candidate} failed: {e}")
+
+    # Not found - raise with details
+    raise FileNotFoundError(f"File not found: {file_path}\nTried: {tried}\nCWD: {os.getcwd()}")
+
+
 def get_parser(file_path: str) -> SDLXLIFFParser:
     """
     Get or create a parser instance for the given file.
@@ -85,8 +127,8 @@ def get_parser(file_path: str) -> SDLXLIFFParser:
     Returns:
         SDLXLIFFParser instance
     """
-    # Normalize path
-    path = Path(file_path).resolve()
+    # Resolve path with sandbox awareness
+    path = resolve_file_path(file_path)
     normalized_path = str(path)
 
     # Get current file modification time
