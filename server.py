@@ -76,10 +76,6 @@ def resolve_file_path(file_path: str) -> Path:
     """
     Resolve a file path, handling Cowork sandbox path translation.
 
-    Cowork passes sandbox paths like /sessions/xxx/mnt/folder/file.sdlxliff
-    but MCP server runs on HOST where those don't exist. We extract the
-    filename and search for it in common user directories.
-
     Args:
         file_path: The file path to resolve (may be sandbox or host path)
 
@@ -89,66 +85,62 @@ def resolve_file_path(file_path: str) -> Path:
     Raises:
         FileNotFoundError: If file cannot be found in any location
     """
-    path = Path(file_path)
-    filename = path.name
+    logger.info(f"resolve_file_path called with: {file_path}")
 
-    # Extract parent folder name (e.g., "ru-RU" from the path)
+    path = Path(file_path)
+
+    # Fast path: if the file exists directly, return immediately
+    try:
+        if path.exists() and path.is_file():
+            resolved = path.resolve()
+            logger.info(f"Direct path exists: {resolved}")
+            return resolved
+    except (OSError, ValueError) as e:
+        logger.debug(f"Direct path check failed: {e}")
+
+    # If it's not a sandbox path and doesn't exist, fail fast
+    is_sandbox_path = "/sessions/" in file_path or file_path.startswith("/mnt/")
+    if not is_sandbox_path:
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    # Sandbox path translation: extract filename and parent folder
+    filename = path.name
     parent_name = path.parent.name if path.parent.name and path.parent.name != "mnt" else None
 
-    logger.info(f"Resolving: {file_path}, filename={filename}, parent={parent_name}")
+    logger.info(f"Sandbox path detected, searching for: {filename} in parent: {parent_name}")
 
-    # Try direct path first
-    candidates = [path]
+    # Search in common user directories
+    home = Path.home()
+    search_roots = [
+        home / "Documents",
+        home / "Downloads",
+        home / "Desktop",
+    ]
 
-    # If it's a sandbox path, search common user directories
-    if "/sessions/" in file_path or "/mnt/" in file_path or not path.exists():
-        home = Path.home()
-        search_roots = [
-            home / "Documents",
-            home / "Downloads",
-            home / "Desktop",
-            home,
-            Path.cwd(),
-        ]
+    # Try direct subfolder paths first (fast)
+    for root in search_roots:
+        if not root.exists():
+            continue
+        if parent_name:
+            candidate = root / parent_name / filename
+            if candidate.exists() and candidate.is_file():
+                logger.info(f"Found via direct path: {candidate}")
+                return candidate.resolve()
 
-        for root in search_roots:
-            if not root.exists():
-                continue
-            # Try with parent folder name if we have it
-            if parent_name:
-                candidates.append(root / parent_name / filename)
-                # Also search recursively for parent/filename pattern
-                try:
-                    for match in root.rglob(f"{parent_name}/{filename}"):
-                        candidates.append(match)
-                        break  # Take first match
-                except (PermissionError, OSError):
-                    pass
-            # Try just the filename
-            candidates.append(root / filename)
-            # Search for file recursively (limited depth)
-            try:
-                for match in root.rglob(filename):
-                    candidates.append(match)
-                    break  # Take first match
-            except (PermissionError, OSError):
-                pass
-
-    # Try each candidate
-    tried = []
-    for candidate in candidates:
+    # Last resort: recursive search (slow, but limited)
+    for root in search_roots:
+        if not root.exists():
+            continue
         try:
-            resolved = candidate.resolve()
-            if str(resolved) not in tried:
-                tried.append(str(resolved))
-            if resolved.exists() and resolved.is_file():
-                logger.info(f"Resolved {file_path} -> {resolved}")
-                return resolved
-        except Exception as e:
-            logger.debug(f"Path candidate {candidate} failed: {e}")
+            pattern = f"**/{parent_name}/{filename}" if parent_name else f"**/{filename}"
+            for match in root.glob(pattern):
+                if match.is_file():
+                    logger.info(f"Found via glob: {match}")
+                    return match.resolve()
+        except (PermissionError, OSError) as e:
+            logger.debug(f"Glob search in {root} failed: {e}")
 
-    # Not found - raise with details
-    raise FileNotFoundError(f"File not found: {file_path}\nSearched for: {filename}\nTried: {tried[:10]}\nCWD: {os.getcwd()}")
+    raise FileNotFoundError(f"File not found: {file_path}\nSearched for: {filename}")
 
 
 def get_parser(file_path: str) -> SDLXLIFFParser:
