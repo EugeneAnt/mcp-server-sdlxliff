@@ -26,7 +26,7 @@ pip install mcp-server-sdlxliff
 ### From source
 
 ```bash
-git clone https://github.com/yourusername/mcp-server-sdlxliff.git
+git clone https://github.com/EugeneAnt/mcp-server-sdlxliff.git
 cd mcp-server-sdlxliff
 uv pip install -e .
 ```
@@ -150,7 +150,7 @@ SDLXLIFF is SDL's extension of the XLIFF 1.2 standard, used by SDL Trados Studio
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/mcp-server-sdlxliff.git
+git clone https://github.com/EugeneAnt/mcp-server-sdlxliff.git
 cd mcp-server-sdlxliff
 
 # Install with dev dependencies

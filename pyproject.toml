@@ -45,9 +45,9 @@ dev = [
 mcp-server-sdlxliff = "mcp_server_sdlxliff.__main__:run"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/mcp-server-sdlxliff"
-Repository = "https://github.com/yourusername/mcp-server-sdlxliff"
-Issues = "https://github.com/yourusername/mcp-server-sdlxliff/issues"
+Homepage = "https://github.com/EugeneAnt/mcp-server-sdlxliff"
+Repository = "https://github.com/EugeneAnt/mcp-server-sdlxliff"
+Issues = "https://github.com/EugeneAnt/mcp-server-sdlxliff/issues"
 
 [build-system]
 requires = ["hatchling"]
