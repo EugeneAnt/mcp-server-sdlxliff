@@ -124,12 +124,15 @@ class SDLXLIFFParser:
         target_elem = trans_unit.find('xliff:target', self.namespaces)
         target_text = self._get_text_content(target_elem) if target_elem is not None else ""
 
-        # Extract status
-        status = target_elem.get('state') if target_elem is not None else None
-
-        # Check if locked (SDL-specific)
-        locked_elem = trans_unit.find('sdl:seg-defs/sdl:seg[@locked]', self.namespaces)
-        locked = locked_elem.get('locked') == 'true' if locked_elem is not None else False
+        # Extract SDL confirmation level from seg-defs
+        status = None
+        locked = False
+        seg_defs = trans_unit.find('sdl:seg-defs', self.namespaces)
+        if seg_defs is not None:
+            first_seg = seg_defs.find('sdl:seg', self.namespaces)
+            if first_seg is not None:
+                status = first_seg.get('conf')
+                locked = first_seg.get('locked') == 'true'
 
         return {
             'segment_id': segment_id,
@@ -191,14 +194,16 @@ class SDLXLIFFParser:
 
         return segments
 
-    def update_segment(self, segment_id: str, target_text: str, status: str = 'needs-translation') -> bool:
+    def update_segment(self, segment_id: str, target_text: str, status: str = 'RejectedTranslation') -> bool:
         """
         Update a specific segment's target text and status.
 
         Args:
             segment_id: ID of the segment to update
             target_text: New target text
-            status: New status (default: 'needs-translation')
+            status: SDL confirmation level (default: 'RejectedTranslation').
+                    Valid values: Draft, Translated, RejectedTranslation,
+                    ApprovedTranslation, RejectedSignOff, ApprovedSignOff
 
         Returns:
             True if segment was found and updated, False otherwise
@@ -223,29 +228,56 @@ class SDLXLIFFParser:
             else:
                 trans_unit.append(target_elem)
 
-        # Preserve existing attributes (except 'state' which we'll update)
-        existing_attribs = dict(target_elem.attrib)
+        # Update target text - need to handle mrk elements for SDLXLIFF
+        # Find mrk elements with mtype="seg" (actual segment content)
+        seg_mrks = target_elem.findall('.//xliff:mrk[@mtype="seg"]', self.namespaces)
 
-        # Remove all child elements and text (but preserve attributes)
-        for child in list(target_elem):
-            target_elem.remove(child)
-        target_elem.text = target_text
+        if seg_mrks:
+            # Put new text in the first mrk, clear all others
+            for i, mrk in enumerate(seg_mrks):
+                # Clear all children (like x-sdl-location markers)
+                for child in list(mrk):
+                    mrk.remove(child)
+                if i == 0:
+                    # First mrk gets the new text
+                    mrk.text = target_text
+                else:
+                    # Other mrks get cleared
+                    mrk.text = None
+                # Preserve tail (spacing between mrk elements)
+        else:
+            # Simple target without mrk - just set text directly
+            for child in list(target_elem):
+                target_elem.remove(child)
+            target_elem.text = target_text
 
-        # Restore existing attributes and update state
-        for key, value in existing_attribs.items():
-            if key != 'state':
-                target_elem.set(key, value)
-        target_elem.set('state', status)
+        # Update SDL confirmation level in seg-defs
+        self._update_sdl_confirmation(trans_unit, status)
 
         return True
 
-    def set_segment_status(self, segment_id: str, status: str) -> bool:
+    def _update_sdl_confirmation(self, trans_unit: etree._Element, conf_level: str):
         """
-        Update a segment's status only.
+        Update the SDL confirmation level for all segments in a trans-unit.
+
+        Args:
+            trans_unit: The trans-unit element
+            conf_level: SDL confirmation level (Draft, Translated, RejectedTranslation, etc.)
+        """
+        seg_defs = trans_unit.find('sdl:seg-defs', self.namespaces)
+        if seg_defs is not None:
+            for seg in seg_defs.findall('sdl:seg', self.namespaces):
+                seg.set('conf', conf_level)
+
+    def set_segment_status(self, segment_id: str, status: str = 'RejectedTranslation') -> bool:
+        """
+        Update a segment's SDL confirmation level only (without changing text).
 
         Args:
             segment_id: ID of the segment to update
-            status: New status value
+            status: SDL confirmation level (default: 'RejectedTranslation').
+                    Valid values: Draft, Translated, RejectedTranslation,
+                    ApprovedTranslation, RejectedSignOff, ApprovedSignOff
 
         Returns:
             True if segment was found and updated, False otherwise
@@ -255,13 +287,9 @@ class SDLXLIFFParser:
         if trans_unit is None:
             return False
 
-        target_elem = trans_unit.find('xliff:target', self.namespaces)
-
-        if target_elem is not None:
-            target_elem.set('state', status)
-            return True
-
-        return False
+        # Update SDL confirmation level
+        self._update_sdl_confirmation(trans_unit, status)
+        return True
 
     def save(self, output_path: Optional[str] = None):
         """
@@ -307,7 +335,7 @@ class SDLXLIFFParser:
         Returns:
             Dictionary with statistics:
             - total_segments: Total number of segments
-            - status_counts: Count of segments by status
+            - status_counts: Count of segments by SDL confirmation level
             - locked_count: Number of locked segments
         """
         trans_units = self.root.findall('.//xliff:trans-unit', self.namespaces)
@@ -319,16 +347,22 @@ class SDLXLIFFParser:
         for trans_unit in trans_units:
             total += 1
 
-            # Get status from target element (without extracting text)
-            target_elem = trans_unit.find('xliff:target', self.namespaces)
-            status = target_elem.get('state') if target_elem is not None else None
-            status_key = status or 'unknown'
-            status_counts[status_key] = status_counts.get(status_key, 0) + 1
+            # Get SDL confirmation level from seg-defs
+            seg_defs = trans_unit.find('sdl:seg-defs', self.namespaces)
+            if seg_defs is not None:
+                first_seg = seg_defs.find('sdl:seg', self.namespaces)
+                if first_seg is not None:
+                    status = first_seg.get('conf')
+                    status_key = status or 'unknown'
+                    status_counts[status_key] = status_counts.get(status_key, 0) + 1
 
-            # Check if locked (SDL-specific)
-            locked_elem = trans_unit.find('sdl:seg-defs/sdl:seg[@locked]', self.namespaces)
-            if locked_elem is not None and locked_elem.get('locked') == 'true':
-                locked_count += 1
+                    # Check if locked
+                    if first_seg.get('locked') == 'true':
+                        locked_count += 1
+                else:
+                    status_counts['unknown'] = status_counts.get('unknown', 0) + 1
+            else:
+                status_counts['unknown'] = status_counts.get('unknown', 0) + 1
 
         return {
             'total_segments': total,

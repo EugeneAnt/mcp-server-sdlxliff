@@ -321,11 +321,11 @@ async def list_tools() -> list[Tool]:
                     "status": {
                         "type": "string",
                         "description": (
-                            "Optional status to set. Common values: "
-                            "'translated', 'needs-translation', 'needs-review-translation', "
-                            "'needs-l10n', 'new', 'final'"
+                            "SDL confirmation level. Valid values: "
+                            "'Draft', 'Translated', 'RejectedTranslation', "
+                            "'ApprovedTranslation', 'RejectedSignOff', 'ApprovedSignOff'"
                         ),
-                        "default": "needs-translation",
+                        "default": "RejectedTranslation",
                     },
                 },
                 "required": ["file_path", "segment_id", "target_text"],
@@ -336,7 +336,7 @@ async def list_tools() -> list[Tool]:
             description=(
                 "Mark a segment as rejected and optionally update the target text. "
                 "This is commonly used during translation review when a translation needs to be redone. "
-                "By default, sets status to 'needs-translation'."
+                "By default, sets SDL confirmation level to 'RejectedTranslation'."
             ),
             inputSchema={
                 "type": "object",
@@ -355,8 +355,12 @@ async def list_tools() -> list[Tool]:
                     },
                     "status": {
                         "type": "string",
-                        "description": "Status to set (default: 'needs-translation'). Other options: 'needs-review-translation', 'rejected', etc.",
-                        "default": "needs-translation",
+                        "description": (
+                            "SDL confirmation level. Valid values: "
+                            "'Draft', 'Translated', 'RejectedTranslation', "
+                            "'ApprovedTranslation', 'RejectedSignOff', 'ApprovedSignOff'"
+                        ),
+                        "default": "RejectedTranslation",
                     },
                 },
                 "required": ["file_path", "segment_id"],
@@ -455,7 +459,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             file_path = arguments["file_path"]
             segment_id = arguments["segment_id"]
             target_text = arguments["target_text"]
-            status = arguments.get("status", "needs-translation")
+            status = arguments.get("status", "RejectedTranslation")
 
             parser = get_parser(file_path)
             success = parser.update_segment(segment_id, target_text, status)
@@ -480,7 +484,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             file_path = arguments["file_path"]
             segment_id = arguments["segment_id"]
             target_text = arguments.get("target_text")
-            status = arguments.get("status", "needs-translation")
+            status = arguments.get("status", "RejectedTranslation")
 
             parser = get_parser(file_path)
 
