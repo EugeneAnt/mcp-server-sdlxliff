@@ -110,6 +110,7 @@ class SDLXLIFFParser:
 
         In SDLXLIFF, each <mrk mtype="seg"> within target is a separate segment.
         The mrk mid corresponds to sdl:seg id for status/metadata.
+        Source text comes from <seg-source> (segmented) when available.
 
         Args:
             trans_unit: The trans-unit XML element
@@ -120,9 +121,19 @@ class SDLXLIFFParser:
         segments = []
         tu_id = trans_unit.get('id')
 
-        # Get source text (usually not segmented in SDLXLIFF)
+        # Get segmented source (seg-source) - preferred for aligned source/target
+        seg_source_elem = trans_unit.find('xliff:seg-source', self.namespaces)
+
+        # Build source text map from seg-source mrk elements
+        source_map = {}
+        if seg_source_elem is not None:
+            for mrk in seg_source_elem.findall('.//xliff:mrk[@mtype="seg"]', self.namespaces):
+                mid = mrk.get('mid')
+                source_map[mid] = self._get_mrk_text(mrk)
+
+        # Fallback: get unsegmented source
         source_elem = trans_unit.find('xliff:source', self.namespaces)
-        source_text = self._get_text_content(source_elem) if source_elem is not None else ""
+        fallback_source = self._get_text_content(source_elem) if source_elem is not None else ""
 
         # Get target element
         target_elem = trans_unit.find('xliff:target', self.namespaces)
@@ -147,13 +158,16 @@ class SDLXLIFFParser:
                     mid = mrk.get('mid')
                     mrk_text = self._get_mrk_text(mrk)
 
+                    # Get matching source from seg-source, or fallback to full source
+                    source_text = source_map.get(mid, fallback_source)
+
                     # Get status from seg-defs
                     seg_info = seg_map.get(mid, {})
 
                     segments.append({
                         'segment_id': mid,  # Use mrk mid as segment ID
                         'trans_unit_id': tu_id,  # Keep trans-unit ID for reference
-                        'source': source_text,  # Source is shared across mrks in same TU
+                        'source': source_text,  # Now aligned with target segment
                         'target': mrk_text,
                         'status': seg_info.get('conf'),
                         'locked': seg_info.get('locked', False),
@@ -163,7 +177,7 @@ class SDLXLIFFParser:
                 segments.append({
                     'segment_id': tu_id,
                     'trans_unit_id': tu_id,
-                    'source': source_text,
+                    'source': fallback_source,
                     'target': self._get_text_content(target_elem),
                     'status': seg_map.get('1', {}).get('conf'),
                     'locked': seg_map.get('1', {}).get('locked', False),
@@ -173,7 +187,7 @@ class SDLXLIFFParser:
             segments.append({
                 'segment_id': tu_id,
                 'trans_unit_id': tu_id,
-                'source': source_text,
+                'source': fallback_source,
                 'target': '',
                 'status': None,
                 'locked': False,
