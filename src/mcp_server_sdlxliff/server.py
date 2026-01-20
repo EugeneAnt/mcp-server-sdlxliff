@@ -75,6 +75,29 @@ _CACHE_MAX_SIZE = 10  # Maximum number of cached parsers
 _path_resolution_cache: dict[str, Path] = {}
 
 
+# Allowed file extensions for this MCP server
+ALLOWED_EXTENSIONS = {'.sdlxliff'}
+
+
+def validate_file_extension(file_path: str) -> None:
+    """
+    Validate that the file has an allowed extension.
+
+    Args:
+        file_path: The file path to validate
+
+    Raises:
+        ValueError: If the file extension is not allowed
+    """
+    path = Path(file_path)
+    suffix = path.suffix.lower()
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise ValueError(
+            f"Invalid file type: '{suffix}'. "
+            f"This tool only supports SDLXLIFF files ({', '.join(ALLOWED_EXTENSIONS)})"
+        )
+
+
 def resolve_file_path(file_path: str) -> Path:
     """
     Resolve a file path, handling Cowork sandbox path translation.
@@ -87,7 +110,10 @@ def resolve_file_path(file_path: str) -> Path:
 
     Raises:
         FileNotFoundError: If file cannot be found in any location
+        ValueError: If the file extension is not allowed
     """
+    # Validate file extension first
+    validate_file_extension(file_path)
     # Check path resolution cache first (for sandbox paths)
     if file_path in _path_resolution_cache:
         cached_path = _path_resolution_cache[file_path]
@@ -439,6 +465,10 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         elif name == "save_sdlxliff":
             file_path = arguments["file_path"]
             output_path = arguments.get("output_path")
+
+            # Validate output_path extension if provided
+            if output_path:
+                validate_file_extension(output_path)
 
             parser = get_parser(file_path)
             parser.save(output_path)
