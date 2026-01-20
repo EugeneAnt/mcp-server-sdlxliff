@@ -17,6 +17,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from mcp_server_sdlxliff.parser import SDLXLIFFParser
+from mcp_server_sdlxliff.constants import MAX_SEGMENT_TEXT_SIZE
 
 
 # Sample SDLXLIFF content with tags for testing
@@ -377,7 +378,7 @@ class TestEdgeCases:
         """Test that very large text is rejected."""
         parser.extract_segments()
 
-        large_text = 'x' * (parser.MAX_SEGMENT_TEXT_SIZE + 1)
+        large_text = 'x' * (MAX_SEGMENT_TEXT_SIZE + 1)
         result = parser.update_segment_with_tags('2', large_text)
         assert result['success'] is False
         assert 'too large' in result['message']

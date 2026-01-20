@@ -17,7 +17,12 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from mcp_server_sdlxliff.parser import SDLXLIFFParser
-from mcp_server_sdlxliff.server import validate_file_extension, ALLOWED_EXTENSIONS
+from mcp_server_sdlxliff.cache import validate_file_extension
+from mcp_server_sdlxliff.constants import (
+    ALLOWED_EXTENSIONS,
+    MAX_FILE_SIZE,
+    MAX_SEGMENT_TEXT_SIZE,
+)
 
 
 # Valid minimal SDLXLIFF for baseline tests
@@ -225,9 +230,8 @@ class TestFileSizeLimits:
         # Create a file larger than the limit (50MB)
         # We'll test with a smaller threshold by checking the error message format
 
-        # First verify the limit constant exists and is reasonable
-        assert hasattr(SDLXLIFFParser, 'MAX_FILE_SIZE')
-        assert SDLXLIFFParser.MAX_FILE_SIZE == 50 * 1024 * 1024  # 50MB
+        # First verify the limit constant is reasonable
+        assert MAX_FILE_SIZE == 50 * 1024 * 1024  # 50MB
 
     def test_large_file_rejected(self):
         """Test that a file exceeding size limit raises ValueError."""
@@ -304,8 +308,7 @@ class TestSegmentTextSizeLimits:
 
     def test_segment_size_limit_constant(self):
         """Test that MAX_SEGMENT_TEXT_SIZE is defined and reasonable."""
-        assert hasattr(SDLXLIFFParser, 'MAX_SEGMENT_TEXT_SIZE')
-        assert SDLXLIFFParser.MAX_SEGMENT_TEXT_SIZE == 100 * 1024  # 100KB
+        assert MAX_SEGMENT_TEXT_SIZE == 100 * 1024  # 100KB
 
     def test_large_segment_text_rejected(self):
         """Test that segment updates exceeding size limit are rejected."""
@@ -318,7 +321,7 @@ class TestSegmentTextSizeLimits:
             parser.extract_segments()
 
             # Try to update with text exceeding the limit
-            large_text = 'x' * (SDLXLIFFParser.MAX_SEGMENT_TEXT_SIZE + 1)
+            large_text = 'x' * (MAX_SEGMENT_TEXT_SIZE + 1)
 
             with pytest.raises(ValueError) as exc_info:
                 parser.update_segment('1', large_text)
@@ -338,7 +341,7 @@ class TestSegmentTextSizeLimits:
             parser.extract_segments()
 
             # Try to update with text exceeding the limit
-            large_text = 'x' * (SDLXLIFFParser.MAX_SEGMENT_TEXT_SIZE + 1)
+            large_text = 'x' * (MAX_SEGMENT_TEXT_SIZE + 1)
 
             result = parser.update_segment_with_tags('1', large_text)
 
