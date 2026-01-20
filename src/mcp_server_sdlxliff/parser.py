@@ -329,6 +329,9 @@ class SDLXLIFFParser:
                 return seg
         return None
 
+    # Maximum segment text size (100KB) - segments are typically much smaller
+    MAX_SEGMENT_TEXT_SIZE = 100 * 1024
+
     def update_segment(self, segment_id: str, target_text: str) -> bool:
         """
         Update a specific segment's target text and set status to RejectedTranslation.
@@ -342,7 +345,17 @@ class SDLXLIFFParser:
 
         Returns:
             True if segment was found and updated, False otherwise
+
+        Raises:
+            ValueError: If target_text exceeds maximum allowed size
         """
+        # Validate input size to prevent DoS
+        if len(target_text) > self.MAX_SEGMENT_TEXT_SIZE:
+            raise ValueError(
+                f"Target text too large: {len(target_text)} characters "
+                f"(max: {self.MAX_SEGMENT_TEXT_SIZE})"
+            )
+
         result = self._find_mrk_by_mid(segment_id)
         if result is None:
             return False
