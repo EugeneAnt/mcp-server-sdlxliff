@@ -285,10 +285,11 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="read_sdlxliff",
             description=(
-                "Extract all translation segments from an SDLXLIFF file. "
+                "Extract translation segments from an SDLXLIFF file. "
                 "Returns segment IDs, source text, target text, status, and locked state. "
-                "ALWAYS use this tool to read SDLXLIFF files - DO NOT write Python code to parse XML. "
-                "Use Cowork's built-in file tools to find the .sdlxliff file path first."
+                "For large files, use offset and limit parameters to read in chunks (e.g., 50 segments at a time). "
+                "Use include_tags=true only when you need to UPDATE segments with formatting tags. "
+                "ALWAYS use this tool to read SDLXLIFF files - DO NOT write Python code to parse XML."
             ),
             inputSchema={
                 "type": "object",
@@ -296,6 +297,27 @@ async def list_tools() -> list[Tool]:
                     "file_path": {
                         "type": "string",
                         "description": "Full path to the SDLXLIFF file",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Starting segment index (0-based). Use with limit for pagination. Default: 0",
+                        "default": 0,
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": (
+                            "Maximum number of segments to return. Use 50 for large files to avoid token limits. "
+                            "Default: all segments."
+                        ),
+                    },
+                    "include_tags": {
+                        "type": "boolean",
+                        "description": (
+                            "If true, includes source_tagged/target_tagged fields with tag placeholders. "
+                            "Only needed when planning to update segments with formatting tags. "
+                            "Default: false (smaller output)."
+                        ),
+                        "default": False,
                     },
                 },
                 "required": ["file_path"],
@@ -305,7 +327,8 @@ async def list_tools() -> list[Tool]:
             name="get_sdlxliff_segment",
             description=(
                 "Get a specific segment from an SDLXLIFF file by its segment ID. "
-                "Returns the segment's source text, target text, status, and locked state."
+                "Returns the segment's source text, target text, status, locked state, and tag information. "
+                "For segments with inline tags, both clean and tagged versions are provided."
             ),
             inputSchema={
                 "type": "object",
@@ -327,6 +350,11 @@ async def list_tools() -> list[Tool]:
             description=(
                 "Update a segment's target text and set status to RejectedTranslation. "
                 "Use this to correct translations. The segment_id is the mrk mid (e.g., '1', '2', '42'). "
+                "IMPORTANT: For segments with formatting tags (has_tags=true), you MUST include "
+                "tag placeholders in target_text to preserve formatting. "
+                "Format: {id}text{/id} for paired tags, {x:id} for self-closing. "
+                "Example: '{5}Acme{/5}{6}&{/6}{7} Events{/7}'. "
+                "If tags are missing or malformed, the update will be rejected with an error. "
                 "Changes are made in memory; you must call save_sdlxliff to persist changes."
             ),
             inputSchema={
@@ -342,7 +370,18 @@ async def list_tools() -> list[Tool]:
                     },
                     "target_text": {
                         "type": "string",
-                        "description": "New target text for the segment",
+                        "description": (
+                            "New target text for the segment. For segments with tags, "
+                            "include placeholders like {5}text{/5} or {x:5}"
+                        ),
+                    },
+                    "preserve_tags": {
+                        "type": "boolean",
+                        "description": (
+                            "If true (default), validates and restores tags from placeholders. "
+                            "If false, strips all tags and uses plain text."
+                        ),
+                        "default": True,
                     },
                 },
                 "required": ["file_path", "segment_id", "target_text"],
@@ -391,6 +430,36 @@ async def list_tools() -> list[Tool]:
                 "required": ["file_path"],
             },
         ),
+        Tool(
+            name="validate_sdlxliff_segment",
+            description=(
+                "Validate proposed changes to a segment before updating. "
+                "Checks that all required tags are present and properly formatted. "
+                "Use this to pre-validate translations before calling update_sdlxliff_segment. "
+                "Returns validation result with any errors or warnings."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the SDLXLIFF file",
+                    },
+                    "segment_id": {
+                        "type": "string",
+                        "description": "The segment ID (mrk mid) to validate against",
+                    },
+                    "target_text": {
+                        "type": "string",
+                        "description": (
+                            "Proposed target text with tag placeholders to validate. "
+                            "Format: {id}text{/id} for paired tags, {x:id} for self-closing."
+                        ),
+                    },
+                },
+                "required": ["file_path", "segment_id", "target_text"],
+            },
+        ),
     ]
 
 
@@ -403,17 +472,44 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     try:
         if name == "read_sdlxliff":
             file_path = arguments["file_path"]
-            logger.info(f"read_sdlxliff: file_path={file_path}")
+            include_tags = arguments.get("include_tags", False)
+            offset = arguments.get("offset", 0)
+            limit = arguments.get("limit")  # None means all
+            logger.info(f"read_sdlxliff: file_path={file_path}, include_tags={include_tags}, offset={offset}, limit={limit}")
             logger.info(f"CWD: {os.getcwd()}")
 
             parser = get_parser(file_path)
-            segments = parser.extract_segments()
-            logger.info(f"Extracted {len(segments)} segments")
+            all_segments = parser.extract_segments()
+            total_count = len(all_segments)
+            logger.info(f"Extracted {total_count} segments")
+
+            # Apply pagination
+            if limit is not None:
+                segments = all_segments[offset:offset + limit]
+            else:
+                segments = all_segments[offset:]
+
+            # Strip tagged fields to reduce output size:
+            # - Always strip if include_tags=false
+            # - Also strip if segment has no tags (duplicates clean text)
+            for seg in segments:
+                if not include_tags or not seg.get('has_tags', False):
+                    seg.pop('source_tagged', None)
+                    seg.pop('target_tagged', None)
+
+            # Build response with pagination metadata
+            response = {
+                "total_segments": total_count,
+                "offset": offset,
+                "count": len(segments),
+                "has_more": (offset + len(segments)) < total_count,
+                "segments": segments,
+            }
 
             return [
                 TextContent(
                     type="text",
-                    text=json.dumps(segments, indent=2, ensure_ascii=False),
+                    text=json.dumps(response, indent=2, ensure_ascii=False),
                 )
             ]
 
@@ -442,23 +538,38 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             file_path = arguments["file_path"]
             segment_id = arguments["segment_id"]
             target_text = arguments["target_text"]
+            preserve_tags = arguments.get("preserve_tags", True)
 
             parser = get_parser(file_path)
-            success = parser.update_segment(segment_id, target_text)
+            result = parser.update_segment_with_tags(
+                segment_id, target_text, preserve_tags=preserve_tags
+            )
 
-            if success:
+            if result['success']:
+                response = {
+                    "status": "success",
+                    "message": f"Successfully updated segment '{segment_id}' (status set to RejectedTranslation). "
+                               f"Remember to call save_sdlxliff to persist changes.",
+                }
+                if result.get('warnings'):
+                    response["warnings"] = result['warnings']
                 return [
                     TextContent(
                         type="text",
-                        text=f"Successfully updated segment '{segment_id}' (status set to RejectedTranslation). "
-                             f"Remember to call save_sdlxliff to persist changes.",
+                        text=json.dumps(response, indent=2, ensure_ascii=False),
                     )
                 ]
             else:
+                response = {
+                    "status": "error",
+                    "message": result['message'],
+                }
+                if result.get('validation'):
+                    response["validation"] = result['validation']
                 return [
                     TextContent(
                         type="text",
-                        text=f"Failed to update segment '{segment_id}'. Segment not found.",
+                        text=json.dumps(response, indent=2, ensure_ascii=False),
                     )
                 ]
 
@@ -493,6 +604,27 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 TextContent(
                     type="text",
                     text=json.dumps(stats, indent=2, ensure_ascii=False),
+                )
+            ]
+
+        elif name == "validate_sdlxliff_segment":
+            file_path = arguments["file_path"]
+            segment_id = arguments["segment_id"]
+            target_text = arguments["target_text"]
+
+            parser = get_parser(file_path)
+            validation = parser.validate_tagged_text(segment_id, target_text)
+
+            # Get the original tagged text for reference
+            segment = parser.get_segment_by_id(segment_id)
+            if segment:
+                validation['original_tagged'] = segment.get('target_tagged', '')
+                validation['has_tags'] = segment.get('has_tags', False)
+
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(validation, indent=2, ensure_ascii=False),
                 )
             ]
 

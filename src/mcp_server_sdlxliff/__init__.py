@@ -5,4 +5,4 @@ A Model Context Protocol server for parsing, reading, and modifying
 SDLXLIFF translation files (SDL Trados Studio format).
 """
 
-__version__ = "0.4.1"
+__version__ = "0.5.0"
