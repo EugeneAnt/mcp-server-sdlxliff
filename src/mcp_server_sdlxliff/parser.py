@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 import re
 import logging
+import os
 
 logger = logging.getLogger("sdlxliff-parser")
 
@@ -897,9 +898,13 @@ class SDLXLIFFParser:
         result['message'] = f"Successfully updated segment '{segment_id}'"
         return result
 
-    def save(self, output_path: Optional[str] = None):
+    def save(self, output_path: Optional[str] = None, create_backup: bool = True):
         """
-        Save the modified SDLXLIFF file.
+        Save the modified SDLXLIFF file using atomic write.
+
+        Uses atomic write pattern (write to temp file, then rename) to prevent
+        file corruption if the process crashes during write. Optionally creates
+        a backup of the original file before overwriting.
 
         Preserves original file characteristics:
         - UTF-8 BOM if present in original
@@ -908,9 +913,16 @@ class SDLXLIFFParser:
 
         Args:
             output_path: Optional output path. If None, overwrites the original file.
+            create_backup: If True and overwriting existing file, create .bak backup.
+                          Default is True.
         """
+        import tempfile
+        import shutil
+
         if output_path is None:
             output_path = str(self.file_path)
+
+        output_path_obj = Path(output_path)
 
         # Check if original file had BOM
         has_bom = False
@@ -927,13 +939,50 @@ class SDLXLIFFParser:
             pretty_print=False,
         )
 
-        # Write with original XML declaration format and BOM
-        with open(output_path, 'wb') as f:
-            if has_bom:
-                f.write(b'\xef\xbb\xbf')
-            # Use original declaration format (double quotes, lowercase)
-            f.write(b'<?xml version="1.0" encoding="utf-8"?>')
-            f.write(xml_content.encode('utf-8'))
+        # Prepare the content to write
+        content_bytes = b''
+        if has_bom:
+            content_bytes += b'\xef\xbb\xbf'
+        content_bytes += b'<?xml version="1.0" encoding="utf-8"?>'
+        content_bytes += xml_content.encode('utf-8')
+
+        # Write to temp file first (atomic write pattern)
+        # Create temp file in the same directory to ensure same filesystem for rename
+        temp_fd = None
+        temp_path = None
+        try:
+            temp_fd, temp_path = tempfile.mkstemp(
+                suffix='.tmp',
+                prefix='.sdlxliff_',
+                dir=output_path_obj.parent
+            )
+            os.write(temp_fd, content_bytes)
+            os.close(temp_fd)
+            temp_fd = None  # Mark as closed
+
+            # Create backup if overwriting existing file
+            if create_backup and output_path_obj.exists():
+                backup_path = output_path_obj.with_suffix(output_path_obj.suffix + '.bak')
+                shutil.copy2(str(output_path_obj), str(backup_path))
+                logger.debug(f"Created backup: {backup_path}")
+
+            # Atomic rename (on same filesystem, this is atomic on POSIX)
+            os.replace(temp_path, output_path)
+            logger.debug(f"Saved file: {output_path}")
+
+        except Exception:
+            # Clean up temp file on error
+            if temp_fd is not None:
+                try:
+                    os.close(temp_fd)
+                except OSError:
+                    pass
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+            raise
 
     def get_segment_by_id(self, segment_id: str) -> Optional[Dict[str, Any]]:
         """

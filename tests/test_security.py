@@ -422,5 +422,122 @@ class TestParserSecurityConfig:
             Path(temp_path).unlink(missing_ok=True)
 
 
+class TestAtomicWrites:
+    """Tests for atomic write and backup functionality."""
+
+    def test_save_creates_backup(self):
+        """Test that save creates a .bak backup file when overwriting."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sdlxliff', delete=False) as f:
+            f.write(VALID_SDLXLIFF)
+            temp_path = f.name
+
+        backup_path = temp_path + '.bak'
+
+        try:
+            parser = SDLXLIFFParser(temp_path)
+            parser.update_segment('1', 'Updated text')
+            parser.save()  # Save with default create_backup=True
+
+            # Verify backup was created
+            assert Path(backup_path).exists(), "Backup file should be created"
+
+            # Verify backup contains original content
+            with open(backup_path, 'rb') as f:
+                backup_content = f.read()
+            assert b'Hello' in backup_content  # Original target text
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
+            Path(backup_path).unlink(missing_ok=True)
+
+    def test_save_no_backup_when_disabled(self):
+        """Test that save doesn't create backup when create_backup=False."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sdlxliff', delete=False) as f:
+            f.write(VALID_SDLXLIFF)
+            temp_path = f.name
+
+        backup_path = temp_path + '.bak'
+
+        try:
+            parser = SDLXLIFFParser(temp_path)
+            parser.update_segment('1', 'Updated text')
+            parser.save(create_backup=False)
+
+            # Verify backup was NOT created
+            assert not Path(backup_path).exists(), "Backup file should not be created"
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
+            Path(backup_path).unlink(missing_ok=True)
+
+    def test_save_atomic_no_temp_file_left_on_success(self):
+        """Test that no temp files are left after successful save."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sdlxliff', delete=False) as f:
+            f.write(VALID_SDLXLIFF)
+            temp_path = f.name
+
+        temp_dir = Path(temp_path).parent
+
+        try:
+            # Count temp files before
+            temp_files_before = list(temp_dir.glob('.sdlxliff_*.tmp'))
+
+            parser = SDLXLIFFParser(temp_path)
+            parser.update_segment('1', 'Updated text')
+            parser.save(create_backup=False)
+
+            # Count temp files after
+            temp_files_after = list(temp_dir.glob('.sdlxliff_*.tmp'))
+
+            # Should be no new temp files left
+            assert len(temp_files_after) == len(temp_files_before), \
+                "No temp files should be left after successful save"
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
+
+    def test_save_preserves_content_on_overwrite(self):
+        """Test that saved file contains updated content."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sdlxliff', delete=False) as f:
+            f.write(VALID_SDLXLIFF)
+            temp_path = f.name
+
+        try:
+            parser = SDLXLIFFParser(temp_path)
+            parser.update_segment('1', 'New translated text')
+            parser.save(create_backup=False)
+
+            # Re-read the file and verify content
+            parser2 = SDLXLIFFParser(temp_path)
+            segment = parser2.get_segment_by_id('1')
+            assert segment['target'] == 'New translated text'
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
+
+    def test_save_to_different_path(self):
+        """Test saving to a different output path."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sdlxliff', delete=False) as f:
+            f.write(VALID_SDLXLIFF)
+            temp_path = f.name
+
+        output_path = temp_path.replace('.sdlxliff', '_output.sdlxliff')
+
+        try:
+            parser = SDLXLIFFParser(temp_path)
+            parser.update_segment('1', 'Output text')
+            parser.save(output_path=output_path)
+
+            # Verify output file exists and has correct content
+            assert Path(output_path).exists()
+            parser2 = SDLXLIFFParser(output_path)
+            segment = parser2.get_segment_by_id('1')
+            assert segment['target'] == 'Output text'
+
+            # Verify original file unchanged
+            parser3 = SDLXLIFFParser(temp_path)
+            segment3 = parser3.get_segment_by_id('1')
+            assert 'Привет' in segment3['target']  # Original text
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
+            Path(output_path).unlink(missing_ok=True)
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
