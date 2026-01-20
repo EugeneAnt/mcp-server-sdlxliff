@@ -39,7 +39,13 @@ class SDLXLIFFParser:
         # Storage for original mrk elements (deep copies for tag restoration)
         # Key: segment_id (mrk mid), Value: (trans_unit_id, deep copy of mrk element)
         self._original_mrk_elements: Dict[str, Tuple[str, etree._Element]] = {}
+        # Segment indices for O(1) lookup (built after loading)
+        # Maps mrk mid -> (trans_unit, mrk element)
+        self._segment_index: Dict[str, Tuple[etree._Element, etree._Element]] = {}
+        # Maps sdl:seg id -> sdl:seg element
+        self._sdl_seg_index: Dict[str, etree._Element] = {}
         self._load_file()
+        self._build_segment_index()
 
     # Maximum file size (50MB) - SDLXLIFF files are typically much smaller
     MAX_FILE_SIZE = 50 * 1024 * 1024
@@ -81,6 +87,38 @@ class SDLXLIFFParser:
                 for prefix, uri in nsmap.items():
                     if prefix is not None:
                         self.namespaces[prefix] = uri
+
+    def _build_segment_index(self):
+        """
+        Build O(1) lookup indices for segments.
+
+        Creates two indices:
+        - _segment_index: Maps mrk mid -> (trans_unit, mrk element) for target segments
+        - _sdl_seg_index: Maps sdl:seg id -> sdl:seg element for status/metadata
+        """
+        # Clear existing indices
+        self._segment_index.clear()
+        self._sdl_seg_index.clear()
+
+        # Build mrk segment index from trans-units
+        for trans_unit in self.root.findall('.//xliff:trans-unit', self.namespaces):
+            target = trans_unit.find('xliff:target', self.namespaces)
+            if target is not None:
+                for mrk in target.findall('.//xliff:mrk[@mtype="seg"]', self.namespaces):
+                    mid = mrk.get('mid')
+                    if mid:
+                        self._segment_index[mid] = (trans_unit, mrk)
+
+        # Build sdl:seg index
+        for seg in self.root.findall('.//sdl:seg', self.namespaces):
+            seg_id = seg.get('id')
+            if seg_id:
+                self._sdl_seg_index[seg_id] = seg
+
+        logger.debug(
+            f"Built segment index: {len(self._segment_index)} mrk segments, "
+            f"{len(self._sdl_seg_index)} sdl:seg elements"
+        )
 
     @staticmethod
     def _escape_xpath_value(value: str) -> str:
@@ -651,7 +689,7 @@ class SDLXLIFFParser:
 
     def _find_mrk_by_mid(self, mid: str) -> Optional[tuple]:
         """
-        Find an mrk element by its mid attribute.
+        Find an mrk element by its mid attribute using O(1) index lookup.
 
         Args:
             mid: The mrk mid to find
@@ -659,17 +697,11 @@ class SDLXLIFFParser:
         Returns:
             Tuple of (trans_unit, mrk_element) or None if not found
         """
-        for trans_unit in self.root.findall('.//xliff:trans-unit', self.namespaces):
-            target = trans_unit.find('xliff:target', self.namespaces)
-            if target is not None:
-                for mrk in target.findall('.//xliff:mrk[@mtype="seg"]', self.namespaces):
-                    if mrk.get('mid') == mid:
-                        return (trans_unit, mrk)
-        return None
+        return self._segment_index.get(mid)
 
     def _find_sdl_seg_by_id(self, seg_id: str) -> Optional[etree._Element]:
         """
-        Find an sdl:seg element by its id attribute.
+        Find an sdl:seg element by its id attribute using O(1) index lookup.
 
         Args:
             seg_id: The sdl:seg id to find
@@ -677,10 +709,7 @@ class SDLXLIFFParser:
         Returns:
             The sdl:seg element or None if not found
         """
-        for seg in self.root.findall('.//sdl:seg', self.namespaces):
-            if seg.get('id') == seg_id:
-                return seg
-        return None
+        return self._sdl_seg_index.get(seg_id)
 
     # Maximum segment text size (100KB) - segments are typically much smaller
     MAX_SEGMENT_TEXT_SIZE = 100 * 1024
@@ -832,6 +861,9 @@ class SDLXLIFFParser:
                         index = list(parent).index(mrk)
                         parent.remove(mrk)
                         parent.insert(index, new_mrk)
+
+                        # Update segment index to point to new element
+                        self._segment_index[segment_id] = (trans_unit, new_mrk)
 
                     # Log warning if tag order changed
                     if validation.get('warnings'):
