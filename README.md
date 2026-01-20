@@ -4,12 +4,12 @@ A Model Context Protocol (MCP) server for parsing, reading, and modifying SDLXLI
 
 ## Compatibility
 
-This MCP server is designed for **Claude Cowork** (recommended):
+This MCP server works with both **Claude Cowork** and **Claude Desktop**:
 
 | Product | Works? | Notes |
 |---------|--------|-------|
 | **Claude Cowork** | Yes | Primary use case. Add a folder with SDLXLIFF files and Claude can discover, read, modify, and save them. |
-| **Claude Desktop (chat)** | Limited | MCP tools available, but no folder context. You must provide exact file paths manually. |
+| **Claude Desktop** | Yes | Use `list_sdlxliff_files` to discover files, or configure search directories (see below). Resources and prompts are available. |
 | **Claude.ai (web)** | No | Web interface supports connectors, but they don't provide local filesystem access. |
 
 ## Features
@@ -52,6 +52,8 @@ Add to your `claude_desktop_config.json`:
 **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
 **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
 
+#### Basic Configuration
+
 ```json
 {
   "mcpServers": {
@@ -75,11 +77,91 @@ Or if using uv:
 }
 ```
 
+#### With Custom Search Directories (Recommended)
+
+For Claude Desktop, configure directories where the server should look for SDLXLIFF files:
+
+```json
+{
+  "mcpServers": {
+    "sdlxliff": {
+      "command": "mcp-server-sdlxliff",
+      "args": ["-d", "/path/to/translations", "-d", "/another/path"]
+    }
+  }
+}
+```
+
+Or using environment variables:
+
+```json
+{
+  "mcpServers": {
+    "sdlxliff": {
+      "command": "mcp-server-sdlxliff",
+      "env": {
+        "SDLXLIFF_SEARCH_DIRS": "/path/to/translations:/another/path"
+      }
+    }
+  }
+}
+```
+
+**Default search directories** (used if none specified):
+- `~/Documents`
+- `~/Downloads`
+- `~/Desktop`
+- `~/Translations`
+
 ### Claude Cowork
 
 Add a folder containing your SDLXLIFF files to Claude Cowork and the MCP tools will be available automatically.
 
+### Command-Line Options
+
+```
+mcp-server-sdlxliff [-d DIRECTORY] ...
+
+Options:
+  -d, --directory PATH    Directory to search for SDLXLIFF files.
+                          Can be specified multiple times.
+
+Environment Variables:
+  SDLXLIFF_SEARCH_DIRS    Colon-separated (Unix) or semicolon-separated (Windows)
+                          list of directories to search.
+```
+
 ## Available Tools
+
+### `list_sdlxliff_files`
+
+Discover and list SDLXLIFF files in configured directories. **Use this first in Claude Desktop** to find available translation files.
+
+**Parameters:**
+- `directory` (string, optional): Specific directory to search. If not provided, searches all configured directories.
+- `max_results` (integer, optional): Maximum number of files to return (default: 50, max: 100)
+
+**Returns:** JSON object with:
+- `searched_directories`: List of directories that were searched
+- `files_found`: Number of files found
+- `files`: Array of file information (path, name, size, modified date, directory)
+
+**Example response:**
+```json
+{
+  "searched_directories": ["/Users/me/Documents", "/Users/me/Downloads"],
+  "files_found": 2,
+  "files": [
+    {
+      "path": "/Users/me/Documents/project/file.sdlxliff",
+      "name": "file.sdlxliff",
+      "size": 125000,
+      "modified": "2025-01-15T10:30:00",
+      "directory": "/Users/me/Documents/project"
+    }
+  ]
+}
+```
 
 ### `read_sdlxliff`
 
@@ -164,19 +246,61 @@ Get statistics about the translation file.
 - `status_counts`: Count of segments by SDL confirmation level
 - `locked_count`: Number of locked segments
 
-## Usage Example
+## MCP Prompts
 
-In Claude Desktop or Claude Cowork:
+The server provides built-in prompts for common workflows. In Claude Desktop, these appear as slash commands:
 
+### `/find-sdlxliff`
+Find SDLXLIFF files on your computer. Useful when you don't know where your files are located.
+
+### `/review-translations`
+Review translations in an SDLXLIFF file for quality issues. Supports focusing on:
+- `grammar` - Grammar and spelling errors
+- `terminology` - Consistent use of terms
+- `consistency` - Consistency between similar phrases
+- `all` - All of the above (default)
+
+### `/translation-status`
+Get a summary of translation progress for an SDLXLIFF file.
+
+## Usage Examples
+
+### Claude Desktop
+
+**Find your SDLXLIFF files:**
+```
+Find SDLXLIFF files on my computer
+```
+Claude will use `list_sdlxliff_files` to discover available files.
+
+**Review a specific file:**
+```
+Review the translations in /path/to/file.sdlxliff for grammar issues
+```
+
+**Using prompts:**
+```
+/find-sdlxliff
+/review-translations file_path=/path/to/file.sdlxliff focus=grammar
+/translation-status file_path=/path/to/file.sdlxliff
+```
+
+### Claude Cowork
+
+In Cowork, simply add a folder containing your SDLXLIFF files and ask:
 ```
 Read the SDLXLIFF file and check the translations for grammar errors
 ```
 
+### Workflow
+
 Claude will:
-1. Use `read_sdlxliff` to extract all segments
-2. Analyze translations for issues
-3. Use `update_sdlxliff_segment` to correct problematic segments
-4. Use `save_sdlxliff` to persist changes
+1. Use `list_sdlxliff_files` to discover files (or you provide a path)
+2. Use `get_sdlxliff_statistics` to understand the file
+3. Use `read_sdlxliff` to extract segments (with pagination for large files)
+4. Analyze translations for issues
+5. Use `update_sdlxliff_segment` to correct problematic segments
+6. Use `save_sdlxliff` to persist changes
 
 ## SDLXLIFF Format
 
