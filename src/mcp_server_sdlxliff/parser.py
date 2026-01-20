@@ -144,6 +144,28 @@ class SDLXLIFFParser:
 
         return ''.join(text_parts)
 
+    def _get_base_segment_id(self, segment_id: str) -> str:
+        """
+        Extract the base segment ID for split segments.
+
+        When a segment is manually split in Trados, it gets IDs like:
+        - Original: "81"
+        - Split: "81_x0020_a", "81_x0020_b", etc.
+
+        The sdl:seg-defs only contains the original ID, so we need to
+        extract it for status lookup.
+
+        Args:
+            segment_id: The mrk mid (may be split like "81_x0020_a")
+
+        Returns:
+            Base segment ID (e.g., "81" for both "81" and "81_x0020_a")
+        """
+        # Split segments have format: {id}_x0020_{letter}
+        if '_x0020_' in segment_id:
+            return segment_id.split('_x0020_')[0]
+        return segment_id
+
     def _extract_segments_from_trans_unit(self, trans_unit: etree._Element) -> List[Dict[str, Any]]:
         """
         Extract all segments from a trans-unit element.
@@ -218,8 +240,9 @@ class SDLXLIFFParser:
                     # Determine if segment has tags
                     has_tags = source_info['has_tags'] or target_content['has_tags']
 
-                    # Get status from seg-defs
-                    seg_info = seg_map.get(mid, {})
+                    # Get status from seg-defs (use base ID for split segments)
+                    base_id = self._get_base_segment_id(mid)
+                    seg_info = seg_map.get(mid) or seg_map.get(base_id, {})
 
                     segments.append({
                         'segment_id': mid,
@@ -546,8 +569,11 @@ class SDLXLIFFParser:
         # Determine if segment has tags
         has_tags = source_content['has_tags'] or target_content['has_tags']
 
-        # Get status from sdl:seg
+        # Get status from sdl:seg (use base ID for split segments)
+        base_id = self._get_base_segment_id(segment_id)
         sdl_seg = self._find_sdl_seg_by_id(segment_id)
+        if sdl_seg is None:
+            sdl_seg = self._find_sdl_seg_by_id(base_id)
         status = sdl_seg.get('conf') if sdl_seg is not None else None
         locked = sdl_seg.get('locked') == 'true' if sdl_seg is not None else False
 
