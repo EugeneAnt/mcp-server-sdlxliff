@@ -33,12 +33,30 @@ class SDLXLIFFParser:
         self.namespaces: Dict[str, str] = dict(self.DEFAULT_NAMESPACES)
         self._load_file()
 
+    # Maximum file size (50MB) - SDLXLIFF files are typically much smaller
+    MAX_FILE_SIZE = 50 * 1024 * 1024
+
     def _load_file(self):
         """Load and parse the SDLXLIFF file."""
         if not self.file_path.exists():
             raise FileNotFoundError(f"File not found: {self.file_path}")
 
-        parser = etree.XMLParser(remove_blank_text=False, strip_cdata=False)
+        # Check file size to prevent memory exhaustion
+        file_size = self.file_path.stat().st_size
+        if file_size > self.MAX_FILE_SIZE:
+            raise ValueError(
+                f"File too large: {file_size / (1024*1024):.1f}MB "
+                f"(max: {self.MAX_FILE_SIZE / (1024*1024):.0f}MB)"
+            )
+
+        # Secure XML parser configuration
+        parser = etree.XMLParser(
+            remove_blank_text=False,
+            strip_cdata=False,
+            resolve_entities=False,  # Prevent XXE attacks
+            no_network=True,         # Block external network access
+            huge_tree=False,         # Prevent billion laughs / memory exhaustion
+        )
         self.tree = etree.parse(str(self.file_path), parser)
         self.root = self.tree.getroot()
 
