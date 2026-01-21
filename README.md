@@ -4,12 +4,12 @@ A Model Context Protocol (MCP) server for parsing, reading, and modifying SDLXLI
 
 ## Compatibility
 
-This MCP server is designed for **Claude Cowork** (recommended):
+This MCP server is designed for **Claude Cowork** only:
 
 | Product | Works? | Notes |
 |---------|--------|-------|
 | **Claude Cowork** | Yes | Primary use case. Add a folder with SDLXLIFF files and Claude can discover, read, modify, and save them. |
-| **Claude Desktop (chat)** | Limited | MCP tools available, but no folder context. You must provide exact file paths manually. |
+| **Claude Desktop (chat)** | No | Files attached via "+ Add files" are uploaded to a sandboxed container that MCP servers cannot access. See [Architectural Limitation](#claude-desktop-chat-limitation) below. |
 | **Claude.ai (web)** | No | Web interface supports connectors, but they don't provide local filesystem access. |
 
 ## Features
@@ -45,9 +45,9 @@ uv pip install -e .
 
 ## Configuration
 
-### Claude Desktop
+### Claude Desktop (required for Cowork)
 
-Add to your `claude_desktop_config.json`:
+Add to your `claude_desktop_config.json` (this config is also used by Claude Cowork):
 
 **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
 **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
@@ -166,7 +166,7 @@ Get statistics about the translation file.
 
 ## Usage Example
 
-In Claude Desktop or Claude Cowork:
+In Claude Cowork, add a folder containing your SDLXLIFF files and prompt:
 
 ```
 Read the SDLXLIFF file and check the translations for grammar errors
@@ -238,6 +238,32 @@ When updating segments with tags:
 2. For segments with `has_tags=true`, use `get_sdlxliff_segment` to get the `source_tagged`/`target_tagged` fields
 3. Include all placeholders when calling `update_sdlxliff_segment`
 4. If validation fails, the error message shows which tags are missing
+
+## Claude Desktop Chat Limitation
+
+Claude Desktop Chat runs Claude in a **gVisor sandboxed container** for security. When you attach files via "+ Add files", they are uploaded to `/mnt/user-data/uploads/` inside this container.
+
+**The problem:** MCP servers run on your **host machine**, not inside the container. They cannot access the sandboxed filesystem where attached files are stored.
+
+```
+┌─────────────────────────────────────────┐
+│          gVisor Container               │
+│  ┌─────────────────────────────────┐    │
+│  │  /mnt/user-data/uploads/        │    │
+│  │    └── your_file.sdlxliff       │ ←── File uploaded here
+│  └─────────────────────────────────┘    │
+│              Claude                      │
+└─────────────────────────────────────────┘
+           ╳ No access ╳
+┌─────────────────────────────────────────┐
+│           Host Machine                   │
+│  ┌─────────────────────────────────┐    │
+│  │      MCP Server (sdlxliff)      │ ←── Cannot read container filesystem
+│  └─────────────────────────────────┘    │
+└─────────────────────────────────────────┘
+```
+
+**Workaround:** Use **Claude Cowork** instead, which grants MCP servers direct access to folders on your host machine.
 
 ## Development
 
