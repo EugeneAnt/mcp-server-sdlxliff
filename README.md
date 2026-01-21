@@ -191,6 +191,7 @@ Run quality assurance checks on the translation file.
 - `file_path` (string, required): Path to the SDLXLIFF file
 - `segment_ids` (array of strings, optional): Specific segment IDs to check. If omitted, checks all segments.
 - `checks` (array of strings, optional): Specific checks to run. If omitted, runs all checks.
+- `glossary_path` (string, optional): Path to glossary file for terminology check. If omitted, auto-discovers `glossary.tsv`, `glossary.txt`, `terminology.tsv`, or `terminology.txt` in the same directory as the SDLXLIFF file.
 
 **Available checks:**
 | Check | Description |
@@ -201,6 +202,18 @@ Run quality assurance checks on the translation file.
 | `whitespace` | Leading/trailing whitespace mismatch between source and target |
 | `brackets` | Different count of `()[]{}` between source and target |
 | `inconsistent_repetitions` | Segments with same source text have different translations |
+| `terminology` | Glossary terms from source must appear in target (requires glossary file) |
+
+**Glossary file format:**
+```
+# Comment lines start with #
+# Format: source_term<TAB>target_term
+Galaxy	Galaxy
+Settings	Настройки
+Smart Switch	Smart Switch
+```
+
+Single terms (without tab) mean the term must appear unchanged in the target.
 
 **Returns:** JSON object with:
 ```json
@@ -208,6 +221,8 @@ Run quality assurance checks on the translation file.
   "total_segments": 184,
   "segments_checked": 184,
   "segments_with_issues": 12,
+  "glossary_used": "/path/to/glossary.tsv",
+  "glossary_terms_count": 5,
   "issues": [
     {
       "segment_id": "42",
@@ -223,7 +238,8 @@ Run quality assurance checks on the translation file.
     "numbers": 3,
     "double_spaces": 2,
     "whitespace": 1,
-    "brackets": 1
+    "brackets": 1,
+    "terminology": 2
   }
 }
 ```

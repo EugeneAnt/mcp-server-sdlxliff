@@ -8,10 +8,12 @@ Tests the quality assurance checks:
 - Leading/trailing whitespace mismatches
 - Bracket/parenthesis mismatches
 - Inconsistent repetitions
+- Terminology/glossary compliance
 """
 
 import pytest
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -23,6 +25,9 @@ from mcp_server_sdlxliff.qa import (
     check_whitespace,
     check_brackets,
     check_inconsistent_repetitions,
+    check_terminology,
+    load_glossary,
+    discover_glossary,
     run_qa_checks,
     QAIssue,
     QAReport,
@@ -473,6 +478,261 @@ class TestEdgeCases:
         # Empty string is handled
         issue = check_trailing_punctuation("1", "", "test.")
         assert issue is None  # Empty source, no comparison
+
+
+class TestLoadGlossary:
+    """Tests for glossary loading functionality."""
+
+    def test_load_valid_glossary(self):
+        """Load a valid tab-delimited glossary."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.tsv', delete=False, encoding='utf-8') as f:
+            f.write("Galaxy\tGalaxy\n")
+            f.write("Settings\tНастройки\n")
+            f.write("OK\tOK\n")
+            glossary_path = f.name
+
+        terms = load_glossary(glossary_path)
+        assert len(terms) == 3
+        assert ("Galaxy", "Galaxy") in terms
+        assert ("Settings", "Настройки") in terms
+        assert ("OK", "OK") in terms
+
+        Path(glossary_path).unlink()
+
+    def test_load_glossary_with_comments(self):
+        """Comments are skipped."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.tsv', delete=False, encoding='utf-8') as f:
+            f.write("# This is a comment\n")
+            f.write("Galaxy\tGalaxy\n")
+            f.write("# Another comment\n")
+            f.write("Settings\tНастройки\n")
+            glossary_path = f.name
+
+        terms = load_glossary(glossary_path)
+        assert len(terms) == 2
+
+        Path(glossary_path).unlink()
+
+    def test_load_glossary_with_empty_lines(self):
+        """Empty lines are skipped."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.tsv', delete=False, encoding='utf-8') as f:
+            f.write("Galaxy\tGalaxy\n")
+            f.write("\n")
+            f.write("   \n")
+            f.write("Settings\tНастройки\n")
+            glossary_path = f.name
+
+        terms = load_glossary(glossary_path)
+        assert len(terms) == 2
+
+        Path(glossary_path).unlink()
+
+    def test_load_glossary_single_term(self):
+        """Single term means it should appear unchanged."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.tsv', delete=False, encoding='utf-8') as f:
+            f.write("Galaxy\n")
+            f.write("iPhone\n")
+            glossary_path = f.name
+
+        terms = load_glossary(glossary_path)
+        assert len(terms) == 2
+        assert ("Galaxy", "Galaxy") in terms
+        assert ("iPhone", "iPhone") in terms
+
+        Path(glossary_path).unlink()
+
+    def test_load_nonexistent_glossary(self):
+        """Return empty list for nonexistent file."""
+        terms = load_glossary("/nonexistent/path/glossary.tsv")
+        assert terms == []
+
+    def test_load_glossary_strips_whitespace(self):
+        """Whitespace around terms is stripped."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.tsv', delete=False, encoding='utf-8') as f:
+            f.write("  Galaxy  \t  Galaxy  \n")
+            glossary_path = f.name
+
+        terms = load_glossary(glossary_path)
+        assert len(terms) == 1
+        assert ("Galaxy", "Galaxy") in terms
+
+        Path(glossary_path).unlink()
+
+
+class TestDiscoverGlossary:
+    """Tests for glossary auto-discovery."""
+
+    def test_discover_glossary_tsv(self):
+        """Discover glossary.tsv in same directory."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sdlxliff_path = Path(tmpdir) / "document.sdlxliff"
+            sdlxliff_path.touch()
+            glossary_path = Path(tmpdir) / "glossary.tsv"
+            glossary_path.write_text("Galaxy\tGalaxy\n")
+
+            discovered = discover_glossary(str(sdlxliff_path))
+            assert discovered == str(glossary_path)
+
+    def test_discover_glossary_txt(self):
+        """Discover glossary.txt when tsv not present."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sdlxliff_path = Path(tmpdir) / "document.sdlxliff"
+            sdlxliff_path.touch()
+            glossary_path = Path(tmpdir) / "glossary.txt"
+            glossary_path.write_text("Galaxy\tGalaxy\n")
+
+            discovered = discover_glossary(str(sdlxliff_path))
+            assert discovered == str(glossary_path)
+
+    def test_discover_terminology_tsv(self):
+        """Discover terminology.tsv when glossary not present."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sdlxliff_path = Path(tmpdir) / "document.sdlxliff"
+            sdlxliff_path.touch()
+            glossary_path = Path(tmpdir) / "terminology.tsv"
+            glossary_path.write_text("Galaxy\tGalaxy\n")
+
+            discovered = discover_glossary(str(sdlxliff_path))
+            assert discovered == str(glossary_path)
+
+    def test_discover_no_glossary(self):
+        """Return None when no glossary found."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sdlxliff_path = Path(tmpdir) / "document.sdlxliff"
+            sdlxliff_path.touch()
+
+            discovered = discover_glossary(str(sdlxliff_path))
+            assert discovered is None
+
+    def test_discover_priority(self):
+        """glossary.tsv takes priority over other filenames."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sdlxliff_path = Path(tmpdir) / "document.sdlxliff"
+            sdlxliff_path.touch()
+            (Path(tmpdir) / "glossary.tsv").write_text("A\tB\n")
+            (Path(tmpdir) / "glossary.txt").write_text("C\tD\n")
+            (Path(tmpdir) / "terminology.tsv").write_text("E\tF\n")
+
+            discovered = discover_glossary(str(sdlxliff_path))
+            assert discovered.endswith("glossary.tsv")
+
+
+class TestCheckTerminology:
+    """Tests for terminology check."""
+
+    def test_term_present_in_both(self):
+        """No issue when term is in both source and target."""
+        terms = [("Galaxy", "Galaxy")]
+        issues = check_terminology("1", "My Galaxy phone", "Мой телефон Galaxy", terms)
+        assert len(issues) == 0
+
+    def test_term_missing_in_target(self):
+        """Issue when source term found but target term missing."""
+        terms = [("Galaxy", "Galaxy")]
+        issues = check_terminology("1", "My Galaxy phone", "Мой телефон", terms)
+        assert len(issues) == 1
+        assert issues[0].check == "terminology"
+        assert "Galaxy" in issues[0].message
+
+    def test_term_not_in_source(self):
+        """No issue when source term not in source text."""
+        terms = [("Galaxy", "Galaxy")]
+        issues = check_terminology("1", "My iPhone phone", "Мой телефон iPhone", terms)
+        assert len(issues) == 0
+
+    def test_multiple_terms(self):
+        """Check multiple terms at once."""
+        terms = [
+            ("Galaxy", "Galaxy"),
+            ("Smart Switch", "Smart Switch"),
+            ("Settings", "Настройки"),
+        ]
+        issues = check_terminology(
+            "1",
+            "Open Galaxy Settings and use Smart Switch",
+            "Откройте Настройки и используйте Smart Switch",  # Missing "Galaxy"
+            terms
+        )
+        assert len(issues) == 1
+        assert "Galaxy" in issues[0].message
+
+    def test_case_sensitive(self):
+        """Terminology check is case-sensitive."""
+        terms = [("Galaxy", "Galaxy")]
+        # "galaxy" (lowercase) doesn't match "Galaxy"
+        issues = check_terminology("1", "My galaxy phone", "Мой телефон galaxy", terms)
+        assert len(issues) == 0
+
+    def test_translated_term(self):
+        """Check that source term maps to translated target term."""
+        terms = [("Settings", "Настройки")]
+        issues = check_terminology("1", "Open Settings", "Откройте Настройки", terms)
+        assert len(issues) == 0
+
+    def test_translated_term_missing(self):
+        """Issue when translated target term is missing."""
+        terms = [("Settings", "Настройки")]
+        issues = check_terminology("1", "Open Settings", "Откройте Settings", terms)
+        assert len(issues) == 1
+        assert "Settings" in issues[0].message
+        assert "Настройки" in issues[0].message
+
+    def test_empty_terms_list(self):
+        """No issues with empty terms list."""
+        issues = check_terminology("1", "Test source", "Test target", [])
+        assert len(issues) == 0
+
+    def test_empty_source_or_target(self):
+        """No issues with empty source or target."""
+        terms = [("Galaxy", "Galaxy")]
+        assert check_terminology("1", "", "Target text", terms) == []
+        assert check_terminology("1", "Source text", "", terms) == []
+
+
+class TestRunQAChecksWithTerminology:
+    """Tests for run_qa_checks with terminology."""
+
+    def test_terminology_check_with_glossary(self):
+        """Terminology check runs when glossary provided."""
+        segments = [
+            {"segment_id": "1", "source": "My Galaxy phone", "target": "Мой телефон"},
+        ]
+        glossary_terms = [("Galaxy", "Galaxy")]
+
+        report = run_qa_checks(segments, checks=["terminology"], glossary_terms=glossary_terms)
+        assert "terminology" in report.summary
+        assert report.summary["terminology"] == 1
+
+    def test_terminology_check_without_glossary(self):
+        """Terminology check doesn't flag when no glossary."""
+        segments = [
+            {"segment_id": "1", "source": "My Galaxy phone", "target": "Мой телефон"},
+        ]
+
+        report = run_qa_checks(segments, checks=["terminology"])
+        # No issues because no glossary terms provided
+        assert "terminology" not in report.summary
+
+    def test_terminology_check_clean(self):
+        """No issues when all terms are correct."""
+        segments = [
+            {"segment_id": "1", "source": "My Galaxy phone", "target": "Мой телефон Galaxy"},
+        ]
+        glossary_terms = [("Galaxy", "Galaxy")]
+
+        report = run_qa_checks(segments, checks=["terminology"], glossary_terms=glossary_terms)
+        assert "terminology" not in report.summary
+
+    def test_terminology_in_all_checks(self):
+        """Terminology is included when running all checks with glossary."""
+        segments = [
+            {"segment_id": "1", "source": "My Galaxy phone.", "target": "Мой телефон"},  # Missing period + Galaxy
+        ]
+        glossary_terms = [("Galaxy", "Galaxy")]
+
+        report = run_qa_checks(segments, glossary_terms=glossary_terms)
+        assert "terminology" in report.summary
+        assert "trailing_punctuation" in report.summary
 
 
 if __name__ == '__main__':

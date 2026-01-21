@@ -24,7 +24,7 @@ from .cache import (
     clear_parser_cache,
     validate_file_extension,
 )
-from .qa import run_qa_checks, QAReport
+from .qa import run_qa_checks, QAReport, load_glossary, discover_glossary
 
 
 # Set up logging - try multiple locations for sandbox compatibility
@@ -283,10 +283,13 @@ async def list_tools() -> list[Tool]:
                 "Run quality assurance checks on an SDLXLIFF file. "
                 "ALWAYS use this tool (not custom scripts) for QA tasks. "
                 "Checks include: trailing punctuation mismatches, missing/extra numbers, "
-                "double spaces, whitespace mismatches, bracket mismatches, and "
-                "inconsistent repetitions (same source text translated differently). "
+                "double spaces, whitespace mismatches, bracket mismatches, "
+                "inconsistent repetitions (same source text translated differently), "
+                "and terminology (glossary compliance). "
+                "For terminology check: auto-discovers glossary.tsv/txt in same folder as SDLXLIFF, "
+                "or specify explicit glossary_path. "
                 "Use for: 'check translation quality', 'find errors', 'are translations consistent', "
-                "'run QA', 'verify before delivery'."
+                "'run QA', 'verify before delivery', 'check terminology', 'verify glossary'."
             ),
             inputSchema={
                 "type": "object",
@@ -314,13 +317,22 @@ async def list_tools() -> list[Tool]:
                                 "whitespace",
                                 "brackets",
                                 "inconsistent_repetitions",
+                                "terminology",
                             ],
                         },
                         "description": (
                             "Optional list of specific checks to run. "
                             "If not provided, runs all checks. "
                             "Available: trailing_punctuation, numbers, double_spaces, "
-                            "whitespace, brackets, inconsistent_repetitions."
+                            "whitespace, brackets, inconsistent_repetitions, terminology."
+                        ),
+                    },
+                    "glossary_path": {
+                        "type": "string",
+                        "description": (
+                            "Optional path to glossary file (tab-delimited: source_term<TAB>target_term). "
+                            "If not provided, auto-discovers glossary.tsv/glossary.txt/terminology.tsv/terminology.txt "
+                            "in same directory as SDLXLIFF file."
                         ),
                     },
                 },
@@ -500,6 +512,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             file_path = arguments["file_path"]
             segment_ids = arguments.get("segment_ids")
             checks = arguments.get("checks")
+            glossary_path = arguments.get("glossary_path")
 
             parser = get_parser(file_path)
             all_segments = parser.extract_segments()
@@ -514,8 +527,24 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             else:
                 segments_to_check = all_segments
 
-            # Run QA checks
-            report = run_qa_checks(segments_to_check, checks)
+            # Load glossary for terminology check
+            glossary_terms = None
+            used_glossary_path = None
+
+            # If glossary_path provided, use it; otherwise auto-discover
+            if glossary_path:
+                glossary_terms = load_glossary(glossary_path)
+                if glossary_terms:
+                    used_glossary_path = glossary_path
+            else:
+                discovered = discover_glossary(file_path)
+                if discovered:
+                    glossary_terms = load_glossary(discovered)
+                    if glossary_terms:
+                        used_glossary_path = discovered
+
+            # Run QA checks with glossary terms
+            report = run_qa_checks(segments_to_check, checks, glossary_terms)
 
             # Convert to JSON-serializable format
             response = {
@@ -535,6 +564,11 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 ],
                 "summary": report.summary,
             }
+
+            # Add glossary info to response
+            if used_glossary_path:
+                response["glossary_used"] = used_glossary_path
+                response["glossary_terms_count"] = len(glossary_terms) if glossary_terms else 0
 
             return [
                 TextContent(

@@ -8,12 +8,14 @@ Provides stateless QA check functions that detect common translation issues:
 - Leading/trailing whitespace mismatches
 - Bracket/parenthesis mismatches
 - Inconsistent repetitions
+- Terminology/glossary compliance
 """
 
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 
 @dataclass
@@ -326,9 +328,130 @@ def check_inconsistent_repetitions(
     return issues
 
 
+def load_glossary(glossary_path: str) -> List[Tuple[str, str]]:
+    """
+    Load terminology from a glossary file.
+
+    Supports tab-delimited format: source_term<TAB>target_term
+    Lines starting with # are comments. Empty lines are skipped.
+
+    Args:
+        glossary_path: Path to the glossary file
+
+    Returns:
+        List of (source_term, target_term) tuples
+    """
+    terms: List[Tuple[str, str]] = []
+    path = Path(glossary_path)
+
+    if not path.exists():
+        return terms
+
+    try:
+        content = path.read_text(encoding='utf-8')
+        for line_num, line in enumerate(content.splitlines(), 1):
+            line = line.strip()
+
+            # Skip empty lines and comments
+            if not line or line.startswith('#'):
+                continue
+
+            # Parse tab-delimited format
+            parts = line.split('\t')
+            if len(parts) >= 2:
+                source_term = parts[0].strip()
+                target_term = parts[1].strip()
+                if source_term and target_term:
+                    terms.append((source_term, target_term))
+            elif len(parts) == 1 and parts[0].strip():
+                # Single term = must appear unchanged in target
+                term = parts[0].strip()
+                terms.append((term, term))
+
+    except (IOError, UnicodeDecodeError):
+        # If we can't read the file, return empty list
+        pass
+
+    return terms
+
+
+def discover_glossary(sdlxliff_path: str) -> Optional[str]:
+    """
+    Auto-discover a glossary file near the SDLXLIFF file.
+
+    Looks for common glossary filenames in the same directory:
+    - glossary.tsv
+    - glossary.txt
+    - terminology.tsv
+    - terminology.txt
+
+    Args:
+        sdlxliff_path: Path to the SDLXLIFF file
+
+    Returns:
+        Path to glossary file if found, None otherwise
+    """
+    sdlxliff_dir = Path(sdlxliff_path).parent
+
+    candidates = [
+        'glossary.tsv',
+        'glossary.txt',
+        'terminology.tsv',
+        'terminology.txt',
+    ]
+
+    for candidate in candidates:
+        glossary_path = sdlxliff_dir / candidate
+        if glossary_path.exists():
+            return str(glossary_path)
+
+    return None
+
+
+def check_terminology(
+    segment_id: str,
+    source: str,
+    target: str,
+    terms: List[Tuple[str, str]]
+) -> List[QAIssue]:
+    """
+    Check that glossary terms from source appear correctly in target.
+
+    Args:
+        segment_id: The segment ID
+        source: Source text
+        target: Target text
+        terms: List of (source_term, target_term) tuples from glossary
+
+    Returns:
+        List of QAIssue for any missing terms
+    """
+    issues: List[QAIssue] = []
+
+    if not source or not target or not terms:
+        return issues
+
+    for source_term, target_term in terms:
+        # Check if source contains this term (case-sensitive)
+        if source_term in source:
+            # Check if target contains the expected target term
+            if target_term not in target:
+                issues.append(QAIssue(
+                    segment_id=segment_id,
+                    check="terminology",
+                    severity="warning",
+                    message=f"Term '{source_term}' found in source but '{target_term}' missing in target",
+                    source_excerpt=_excerpt(source),
+                    target_excerpt=_excerpt(target),
+                ))
+
+    return issues
+
+
 def run_qa_checks(
     segments: List[Dict[str, Any]],
-    checks: Optional[List[str]] = None
+    checks: Optional[List[str]] = None,
+    glossary_terms: Optional[List[Tuple[str, str]]] = None
 ) -> QAReport:
     """
     Run all QA checks on a list of segments.
@@ -337,7 +460,10 @@ def run_qa_checks(
         segments: List of segment dictionaries from SDLXLIFFParser.extract_segments()
         checks: Optional list of check names to run. If None, runs all checks.
                 Valid names: trailing_punctuation, numbers, double_spaces,
-                            whitespace, brackets, inconsistent_repetitions
+                            whitespace, brackets, inconsistent_repetitions, terminology
+        glossary_terms: Optional list of (source_term, target_term) tuples for
+                       terminology checking. If provided and 'terminology' check
+                       is enabled, verifies terms are preserved.
 
     Returns:
         QAReport with all issues found
@@ -349,6 +475,7 @@ def run_qa_checks(
         'whitespace',
         'brackets',
         'inconsistent_repetitions',
+        'terminology',
     }
 
     if checks is None:
@@ -391,6 +518,10 @@ def run_qa_checks(
             issue = check_brackets(segment_id, source, target)
             if issue:
                 segment_issues.append(issue)
+
+        if 'terminology' in enabled_checks and glossary_terms:
+            term_issues = check_terminology(segment_id, source, target, glossary_terms)
+            segment_issues.extend(term_issues)
 
         if segment_issues:
             segments_with_issues.add(segment_id)
