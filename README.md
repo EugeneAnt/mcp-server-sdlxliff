@@ -1,25 +1,38 @@
 # mcp-server-sdlxliff
 
-A Model Context Protocol (MCP) server for parsing, reading, and modifying SDLXLIFF translation files. Enables Claude to review and correct SDL Trados Studio translation files directly.
+**Chat with your SDL Trados translation files using Claude.**
+
+Review translations, find errors, and make corrections through simple natural conversation - no manual XML editing required.
+
+## What You Can Do
+
+Just ask Claude in plain language:
+
+- *"Check this file for grammar errors in the Russian translations"*
+- *"Find segments where the translation is much longer than the source"*
+- *"Fix segment 42 - change 'программа' to 'приложение'"*
+- *"Show me all segments that are still in Draft status"*
+- *"Save my changes"*
+
+Claude reads your SDLXLIFF files, understands the translation context, and can make corrections while preserving all formatting tags automatically.
 
 ## Compatibility
 
-This MCP server is designed for **Claude Cowork** only:
+Works with **Claude Cowork** (Claude Desktop's project mode):
 
 | Product | Works? | Notes |
 |---------|--------|-------|
-| **Claude Cowork** | Yes | Primary use case. Add a folder with SDLXLIFF files and Claude can discover, read, modify, and save them. |
-| **Claude Desktop (chat)** | No | Files attached via "+ Add files" are uploaded to a sandboxed container that MCP servers cannot access. See [Architectural Limitation](#claude-desktop-chat-limitation) below. |
-| **Claude.ai (web)** | No | Web interface supports connectors, but they don't provide local filesystem access. |
+| **Claude Cowork** | Yes | Add a folder with SDLXLIFF files and start chatting |
+| **Claude Desktop (chat)** | No | [Sandbox limitation](#claude-desktop-chat-limitation) prevents file access |
+| **Claude.ai (web)** | No | No local filesystem access |
 
 ## Features
 
-- **Read SDLXLIFF files** - Extract all segments with source text, target text, status, and metadata
-- **Update translations** - Modify target text for specific segments (automatically sets status to `RejectedTranslation`)
-- **Inline tag preservation** - Safely handle formatting tags (`<g>`, `<x>`, etc.) during translation updates
-- **Pagination support** - Read large files in chunks to avoid token limits
-- **Save changes** - Persist modifications back to SDLXLIFF files
-- **Get statistics** - View translation progress and segment counts by status
+- **Natural conversation** - Ask questions and request changes in plain language
+- **Error detection** - Find grammar, spelling, consistency, and terminology issues
+- **Safe corrections** - Edit translations while preserving all formatting tags
+- **Batch review** - Process large files with automatic pagination
+- **Change tracking** - Modified segments are marked as `RejectedTranslation` for easy review in Trados
 
 ## Installation
 
