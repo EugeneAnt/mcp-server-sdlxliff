@@ -183,6 +183,51 @@ Get statistics about the translation file.
 - `status_counts`: Count of segments by SDL confirmation level
 - `locked_count`: Number of locked segments
 
+### `qa_check_sdlxliff`
+
+Run quality assurance checks on the translation file.
+
+**Parameters:**
+- `file_path` (string, required): Path to the SDLXLIFF file
+- `segment_ids` (array of strings, optional): Specific segment IDs to check. If omitted, checks all segments.
+- `checks` (array of strings, optional): Specific checks to run. If omitted, runs all checks.
+
+**Available checks:**
+| Check | Description |
+|-------|-------------|
+| `trailing_punctuation` | Source ends with `.!?:;` but target doesn't (or vice versa) |
+| `numbers` | Numbers in source don't match numbers in target |
+| `double_spaces` | Target contains consecutive spaces |
+| `whitespace` | Leading/trailing whitespace mismatch between source and target |
+| `brackets` | Different count of `()[]{}` between source and target |
+| `inconsistent_repetitions` | Segments with same source text have different translations |
+
+**Returns:** JSON object with:
+```json
+{
+  "total_segments": 184,
+  "segments_checked": 184,
+  "segments_with_issues": 12,
+  "issues": [
+    {
+      "segment_id": "42",
+      "check": "trailing_punctuation",
+      "severity": "warning",
+      "message": "Source ends with '.' but target does not",
+      "source_excerpt": "...end of sentence.",
+      "target_excerpt": "...end of sentence"
+    }
+  ],
+  "summary": {
+    "trailing_punctuation": 5,
+    "numbers": 3,
+    "double_spaces": 2,
+    "whitespace": 1,
+    "brackets": 1
+  }
+}
+```
+
 ## Usage Example
 
 In Claude Cowork, add a folder containing your SDLXLIFF files and prompt:

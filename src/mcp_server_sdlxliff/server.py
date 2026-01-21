@@ -24,6 +24,7 @@ from .cache import (
     clear_parser_cache,
     validate_file_extension,
 )
+from .qa import run_qa_checks, QAReport
 
 
 # Set up logging - try multiple locations for sandbox compatibility
@@ -276,6 +277,56 @@ async def list_tools() -> list[Tool]:
                 "required": ["file_path", "segment_id", "target_text"],
             },
         ),
+        Tool(
+            name="qa_check_sdlxliff",
+            description=(
+                "Run quality assurance checks on an SDLXLIFF file. "
+                "ALWAYS use this tool (not custom scripts) for QA tasks. "
+                "Checks include: trailing punctuation mismatches, missing/extra numbers, "
+                "double spaces, whitespace mismatches, bracket mismatches, and "
+                "inconsistent repetitions (same source text translated differently). "
+                "Use for: 'check translation quality', 'find errors', 'are translations consistent', "
+                "'run QA', 'verify before delivery'."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the SDLXLIFF file",
+                    },
+                    "segment_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Optional list of segment IDs to check. "
+                            "If not provided, checks all segments."
+                        ),
+                    },
+                    "checks": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "trailing_punctuation",
+                                "numbers",
+                                "double_spaces",
+                                "whitespace",
+                                "brackets",
+                                "inconsistent_repetitions",
+                            ],
+                        },
+                        "description": (
+                            "Optional list of specific checks to run. "
+                            "If not provided, runs all checks. "
+                            "Available: trailing_punctuation, numbers, double_spaces, "
+                            "whitespace, brackets, inconsistent_repetitions."
+                        ),
+                    },
+                },
+                "required": ["file_path"],
+            },
+        ),
     ]
 
 
@@ -442,6 +493,53 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 TextContent(
                     type="text",
                     text=json.dumps(validation, indent=2, ensure_ascii=False),
+                )
+            ]
+
+        elif name == "qa_check_sdlxliff":
+            file_path = arguments["file_path"]
+            segment_ids = arguments.get("segment_ids")
+            checks = arguments.get("checks")
+
+            parser = get_parser(file_path)
+            all_segments = parser.extract_segments()
+
+            # Filter segments if specific IDs provided
+            if segment_ids:
+                segment_id_set = set(segment_ids)
+                segments_to_check = [
+                    s for s in all_segments
+                    if s['segment_id'] in segment_id_set
+                ]
+            else:
+                segments_to_check = all_segments
+
+            # Run QA checks
+            report = run_qa_checks(segments_to_check, checks)
+
+            # Convert to JSON-serializable format
+            response = {
+                "total_segments": report.total_segments,
+                "segments_checked": report.segments_checked,
+                "segments_with_issues": report.segments_with_issues,
+                "issues": [
+                    {
+                        "segment_id": issue.segment_id,
+                        "check": issue.check,
+                        "severity": issue.severity,
+                        "message": issue.message,
+                        "source_excerpt": issue.source_excerpt,
+                        "target_excerpt": issue.target_excerpt,
+                    }
+                    for issue in report.issues
+                ],
+                "summary": report.summary,
+            }
+
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(response, indent=2, ensure_ascii=False),
                 )
             ]
 
