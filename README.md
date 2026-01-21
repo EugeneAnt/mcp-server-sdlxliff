@@ -34,6 +34,18 @@ Works with **Claude Cowork** (Claude Desktop's project mode):
 - **Batch review** - Process large files with automatic pagination
 - **Change tracking** - Modified segments are marked as `RejectedTranslation` for easy review in Trados
 
+## Human in the Loop
+
+Claude's corrections are **suggestions, not final changes**. The workflow keeps you in control:
+
+1. Claude marks all modified segments as `RejectedTranslation`
+2. Open the file in SDL Trados Studio
+3. Filter by status → `RejectedTranslation` to see only Claude's changes
+4. Review each suggestion and **Confirm** or **Edit** as needed
+5. Your approved changes become `Translated` or `ApprovedTranslation`
+
+This ensures human oversight - you always have the final say on what goes into the translation.
+
 ## Installation
 
 ### Desktop Extension (Recommended)
