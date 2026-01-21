@@ -288,6 +288,14 @@ class SDLXLIFFParser:
         """
         Extract all translation segments from the SDLXLIFF file.
 
+        Filters out non-translatable trans-units:
+        - Those with translate="no" attribute (explicitly non-translatable)
+        - Those without sdl:seg-defs element (structural placeholders with no
+          translation metadata, common in IDML-derived files)
+
+        This matches Trados Studio behavior when "Display segments with
+        translate='no' as locked content" setting is disabled.
+
         Returns:
             List of dictionaries containing segment information
         """
@@ -295,6 +303,16 @@ class SDLXLIFFParser:
         trans_units = self.root.findall('.//xliff:trans-unit', self.namespaces)
 
         for trans_unit in trans_units:
+            # Skip explicitly non-translatable trans-units
+            if trans_unit.get('translate') == 'no':
+                continue
+
+            # Skip trans-units without translation metadata (structural elements)
+            # These are IDML placeholders with no actual text content
+            seg_defs = trans_unit.find('sdl:seg-defs', self.namespaces)
+            if seg_defs is None:
+                continue
+
             segments.extend(self._extract_segments_from_trans_unit(trans_unit))
 
         return segments
