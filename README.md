@@ -130,6 +130,7 @@ Each segment contains:
 - `target_tagged`: Target with tag placeholders (only if `has_tags=true` and `include_tags=true`)
 - `status`: SDL confirmation level (e.g., `Translated`, `RejectedTranslation`)
 - `locked`: Whether segment is locked
+- `repetitions`: Number of times this source text appears in the file (only present when > 1)
 
 ### `get_sdlxliff_segment`
 

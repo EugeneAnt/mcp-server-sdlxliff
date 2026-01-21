@@ -48,8 +48,11 @@ class SDLXLIFFParser:
         self._segment_index: Dict[str, Tuple[etree._Element, etree._Element]] = {}
         # Maps sdl:seg id -> sdl:seg element
         self._sdl_seg_index: Dict[str, etree._Element] = {}
+        # Repetition index: maps (tu_id, seg_id) -> count of repetitions
+        self._repetition_counts: Dict[Tuple[str, str], int] = {}
         self._load_file()
         self._build_segment_index()
+        self._build_repetition_index()
 
     def _load_file(self):
         """Load and parse the SDLXLIFF file."""
@@ -95,6 +98,45 @@ class SDLXLIFFParser:
             f"Built segment index: {len(self._segment_index)} mrk segments, "
             f"{len(self._sdl_seg_index)} sdl:seg elements"
         )
+
+    def _build_repetition_index(self):
+        """
+        Build repetition count index from sdl:rep-defs.
+
+        Parses the <rep-defs> section in <doc-info> to count how many segments
+        share the same source text. The count is stored per (tu_id, seg_id) tuple.
+
+        Structure in SDLXLIFF:
+        <doc-info>
+          <rep-defs>
+            <rep-def id="hash123">
+              <entry tu="tu-guid-1" seg="5"/>
+              <entry tu="tu-guid-2" seg="14"/>
+            </rep-def>
+          </rep-defs>
+        </doc-info>
+        """
+        self._repetition_counts.clear()
+
+        # Find rep-defs section (inside doc-info)
+        rep_defs = self.root.find('.//sdl:rep-defs', self.namespaces)
+        if rep_defs is None:
+            return
+
+        # Process each repetition group
+        for rep_def in rep_defs.findall('sdl:rep-def', self.namespaces):
+            entries = rep_def.findall('sdl:entry', self.namespaces)
+            count = len(entries)
+
+            if count > 1:
+                # Store count for each segment in the group
+                for entry in entries:
+                    tu_id = entry.get('tu')
+                    seg_id = entry.get('seg')
+                    if tu_id and seg_id:
+                        self._repetition_counts[(tu_id, seg_id)] = count
+
+        logger.debug(f"Built repetition index: {len(self._repetition_counts)} repeated segments")
 
     def _find_mrk_by_mid(self, mid: str) -> Optional[Tuple[etree._Element, etree._Element]]:
         """
@@ -244,7 +286,7 @@ class SDLXLIFFParser:
                     base_id = self._get_base_segment_id(mid)
                     seg_info = seg_map.get(mid) or seg_map.get(base_id, {})
 
-                    segments.append({
+                    segment_data = {
                         'segment_id': mid,
                         'trans_unit_id': tu_id,
                         'source': source_info['clean'],
@@ -254,7 +296,14 @@ class SDLXLIFFParser:
                         'has_tags': has_tags,
                         'status': seg_info.get('conf'),
                         'locked': seg_info.get('locked', False),
-                    })
+                    }
+
+                    # Add repetitions count only when > 1 (to minimize token overhead)
+                    rep_count = self._repetition_counts.get((tu_id, mid))
+                    if rep_count and rep_count > 1:
+                        segment_data['repetitions'] = rep_count
+
+                    segments.append(segment_data)
             else:
                 # No mrk segments - treat whole target as single segment
                 segments.append({
@@ -595,7 +644,7 @@ class SDLXLIFFParser:
         status = sdl_seg.get('conf') if sdl_seg is not None else None
         locked = sdl_seg.get('locked') == 'true' if sdl_seg is not None else False
 
-        return {
+        segment_data = {
             'segment_id': segment_id,
             'trans_unit_id': tu_id,
             'source': source_content['clean_text'],
@@ -606,6 +655,13 @@ class SDLXLIFFParser:
             'status': status,
             'locked': locked,
         }
+
+        # Add repetitions count only when > 1 (to minimize token overhead)
+        rep_count = self._repetition_counts.get((tu_id, segment_id))
+        if rep_count and rep_count > 1:
+            segment_data['repetitions'] = rep_count
+
+        return segment_data
 
     def get_file_metadata(self) -> Dict[str, Any]:
         """
