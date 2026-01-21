@@ -23,31 +23,24 @@ This MCP server is designed for **Claude Cowork** only:
 
 ## Installation
 
-### Using uv (Recommended)
+### Desktop Extension (Recommended)
 
-```bash
-uv pip install mcp-server-sdlxliff
-```
+The easiest way to install - no command line required:
 
-### Using pip
+1. Download `mcp-server-sdlxliff-X.X.X.mcpb` from [Releases](https://github.com/EugeneAnt/mcp-server-sdlxliff/releases)
+2. Open Claude Desktop → Settings → Extensions
+3. Click "Install Extension" and select the downloaded `.mcpb` file
+4. The extension will install automatically (Python and dependencies are managed for you)
+
+### Using pip (For Developers)
+
+If you prefer manual installation:
 
 ```bash
 pip install mcp-server-sdlxliff
 ```
 
-### From source
-
-```bash
-git clone https://github.com/EugeneAnt/mcp-server-sdlxliff.git
-cd mcp-server-sdlxliff
-uv pip install -e .
-```
-
-## Configuration
-
-### Claude Desktop (required for Cowork)
-
-Add to your `claude_desktop_config.json` (this config is also used by Claude Cowork):
+Then add to your `claude_desktop_config.json`:
 
 **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
 **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
@@ -62,22 +55,22 @@ Add to your `claude_desktop_config.json` (this config is also used by Claude Cow
 }
 ```
 
-Or if using uv:
+### From Source (For Contributors)
 
-```json
-{
-  "mcpServers": {
-    "sdlxliff": {
-      "command": "uvx",
-      "args": ["mcp-server-sdlxliff"]
-    }
-  }
-}
+```bash
+git clone https://github.com/EugeneAnt/mcp-server-sdlxliff.git
+cd mcp-server-sdlxliff
+uv pip install -e ".[dev]"
 ```
+
+## Usage
 
 ### Claude Cowork
 
-Add a folder containing your SDLXLIFF files to Claude Cowork and the MCP tools will be available automatically.
+1. Open Claude Cowork
+2. Click "+ Add folder" and select a folder containing your SDLXLIFF files
+3. The MCP tools will be available automatically
+4. Ask Claude to review or edit translations
 
 ## Available Tools
 
@@ -278,6 +271,23 @@ uv pip install -e ".[dev]"
 # Run tests
 pytest
 ```
+
+### Building the Desktop Extension
+
+To create a `.mcpb` bundle for distribution:
+
+```bash
+# Install the MCPB CLI
+npm install -g @anthropic-ai/mcpb
+
+# Validate the manifest
+mcpb validate manifest.json
+
+# Create the bundle
+mcpb pack .
+```
+
+This creates `mcp-server-sdlxliff-X.X.X.mcpb` ready for installation in Claude Desktop.
 
 ## License
 

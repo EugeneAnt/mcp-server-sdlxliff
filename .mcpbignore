@@ -1,0 +1,65 @@
+# Version control
+.git/
+.gitignore
+.gitattributes
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Testing
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Internal development files
+internal/
+sample/
+
+# Documentation (README is kept)
+CLAUDE.md
+
+# Logs
+*.log
+sdlxliff_debug.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# MCPB artifacts
+*.mcpb

@@ -1,0 +1,69 @@
+{
+  "manifest_version": "0.4",
+  "name": "mcp-server-sdlxliff",
+  "display_name": "SDLXLIFF Translation Editor",
+  "version": "0.6.2",
+  "description": "Read, review, and edit SDL Trados SDLXLIFF translation files with Claude. Supports inline tag preservation, pagination, and atomic saves with backup.",
+  "long_description": "An MCP server for working with SDLXLIFF translation files (SDL Trados Studio format). Features include:\n\n- Extract translation segments with source/target text and status\n- Update translations with automatic tag preservation\n- Paginated reading for large files\n- Atomic writes with automatic backup\n- Statistics and segment filtering\n\nDesigned for use with Claude Cowork to review and correct translations.",
+  "author": {
+    "name": "Yevgeni Antonov",
+    "url": "https://github.com/EugeneAnt"
+  },
+  "server": {
+    "type": "uv",
+    "entry_point": "src/mcp_server_sdlxliff/__main__.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": ["run", "${__dirname}/src/mcp_server_sdlxliff/__main__.py"]
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "linux", "win32"],
+    "runtimes": {
+      "python": ">=3.10"
+    }
+  },
+  "tools": [
+    {
+      "name": "read_sdlxliff",
+      "description": "Extract translation segments from an SDLXLIFF file with pagination support"
+    },
+    {
+      "name": "get_sdlxliff_segment",
+      "description": "Get a specific segment by ID"
+    },
+    {
+      "name": "update_sdlxliff_segment",
+      "description": "Update a segment's target text with tag preservation"
+    },
+    {
+      "name": "validate_sdlxliff_segment",
+      "description": "Validate proposed changes before updating"
+    },
+    {
+      "name": "save_sdlxliff",
+      "description": "Save changes to the SDLXLIFF file"
+    },
+    {
+      "name": "get_sdlxliff_statistics",
+      "description": "Get statistics about the translation file"
+    }
+  ],
+  "keywords": [
+    "translation",
+    "localization",
+    "sdlxliff",
+    "xliff",
+    "trados",
+    "cat-tools",
+    "l10n",
+    "i18n"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/EugeneAnt/mcp-server-sdlxliff"
+  },
+  "homepage": "https://github.com/EugeneAnt/mcp-server-sdlxliff",
+  "documentation": "https://github.com/EugeneAnt/mcp-server-sdlxliff#readme"
+}

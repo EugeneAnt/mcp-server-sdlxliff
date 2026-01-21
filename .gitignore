@@ -34,3 +34,6 @@ CLAUDE.md
 
 # Internal files
 internal
+
+# MCPB build artifacts
+*.mcpb
