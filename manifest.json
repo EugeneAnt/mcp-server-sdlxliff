@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "mcp-server-sdlxliff",
   "display_name": "SDLXLIFF Translation Editor",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Read, review, and edit SDL Trados SDLXLIFF translation files with Claude. Supports inline tag preservation, pagination, and atomic saves with backup.",
   "long_description": "An MCP server for working with SDLXLIFF translation files (SDL Trados Studio format). Features include:\n\n- Extract translation segments with source/target text and status\n- Update translations with automatic tag preservation\n- Paginated reading for large files\n- Atomic writes with automatic backup\n- Statistics and segment filtering\n\nDesigned for use with Claude Cowork to review and correct translations.",
   "author": {

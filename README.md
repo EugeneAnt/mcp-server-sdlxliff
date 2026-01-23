@@ -34,10 +34,10 @@ A standalone macOS app with a native file picker - no command line required.
 
 1. Install the MCP server **globally** (not in a virtual environment):
    ```bash
-   pip install mcp-server-sdlxliff
+   pip3 install mcp-server-sdlxliff
    ```
 
-   > **Note:** The desktop app runs `python -m mcp_server_sdlxliff` to start the server. If you install in a virtual environment, the app won't be able to find it.
+   > **Note:** The desktop app looks for Python at `/opt/homebrew/bin/python3` (Apple Silicon) or `/usr/local/bin/python3` (Intel Mac). Make sure to install with the same `pip3` that corresponds to your Homebrew Python.
 
 2. Download `XLIFF.Chat-1.0.0.dmg` from [Releases](https://github.com/EugeneAnt/mcp-server-sdlxliff/releases)
 

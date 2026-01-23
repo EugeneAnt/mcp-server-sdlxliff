@@ -150,7 +150,14 @@ Be helpful and concise. Preserve formatting and tags in translations.`;
 			mcpTools = client.getToolsForClaude() as Anthropic.Tool[];
 			console.log('MCP connected, tools:', mcpTools.map(t => t.name));
 		} catch (error) {
-			mcpError = error instanceof Error ? error.message : 'Failed to connect to MCP server';
+			// Tauri errors can be strings or objects
+			if (error instanceof Error) {
+				mcpError = error.message;
+			} else if (typeof error === 'string') {
+				mcpError = error;
+			} else {
+				mcpError = JSON.stringify(error);
+			}
 			mcpConnected = false;
 			console.error('MCP connection failed:', error);
 		}
@@ -470,7 +477,7 @@ Be helpful and concise. Preserve formatting and tags in translations.`;
 						<p>Start a conversation to translate and edit SDLXLIFF files.</p>
 						<p class="text-sm text-zinc-600 italic mt-2">Try: "Open ~/Documents/sample.sdlxliff and show me the statistics"</p>
 						{#if !mcpConnected && mcpError}
-							<p class="text-sm text-red-400 mt-2">Note: MCP server not connected. Install mcp-server-sdlxliff first.</p>
+							<p class="text-sm text-red-400 mt-2">MCP Error: {mcpError}</p>
 						{/if}
 					</div>
 				{/if}
