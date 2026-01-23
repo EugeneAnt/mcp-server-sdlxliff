@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "SDLXLIFF Editor",
-  "version": "0.1.0",
+  "productName": "XLIFF Chat",
+  "version": "1.0.0",
   "identifier": "com.sdlxliff.editor",
   "build": {
     "frontendDist": "../build",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "SDLXLIFF Editor",
+        "title": "XLIFF Chat",
         "width": 1200,
         "height": 800,
         "minWidth": 800,

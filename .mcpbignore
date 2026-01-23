@@ -61,5 +61,9 @@ sdlxliff_debug.log
 .DS_Store
 Thumbs.db
 
+# Desktop app (separate distribution)
+desktop/
+ai/
+
 # MCPB artifacts
 *.mcpb

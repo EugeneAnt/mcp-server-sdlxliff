@@ -35,11 +35,9 @@ export class McpClient {
 	private initialized = false;
 	private running = false;
 
-	constructor(private workingDir: string) {}
-
 	async connect(): Promise<void> {
 		// Spawn the MCP server using Tauri command
-		await invoke('spawn_mcp_server', { workingDir: this.workingDir });
+		await invoke('spawn_mcp_server');
 		this.running = true;
 
 		// Initialize the MCP connection
@@ -144,10 +142,7 @@ export async function connectMcpServer(): Promise<McpClient> {
 		return mcpClient;
 	}
 
-	// Use the parent directory of the desktop app
-	const workingDir = '/Users/yevgeniyantonov/PycharmProjects/CCDesktopXliffTool';
-
-	mcpClient = new McpClient(workingDir);
+	mcpClient = new McpClient();
 	await mcpClient.connect();
 	return mcpClient;
 }

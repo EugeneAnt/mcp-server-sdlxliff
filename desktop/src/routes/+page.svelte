@@ -301,7 +301,7 @@ Be helpful and concise. Preserve formatting and tags in translations.`;
 <div class="flex flex-col h-screen bg-zinc-900 text-zinc-200 font-sans">
 	<!-- Header -->
 	<header class="flex items-center justify-between p-4 bg-zinc-800 border-b border-zinc-700">
-		<h1 class="text-lg font-medium">SDLXLIFF Editor</h1>
+		<h1 class="text-lg font-medium">XLIFF Chat</h1>
 		<div class="flex items-center gap-4">
 			{#if !showApiKeyInput}
 				<button
@@ -442,7 +442,7 @@ Be helpful and concise. Preserve formatting and tags in translations.`;
 		{#if showApiKeyInput}
 			<div class="flex-1 flex items-center justify-center p-8">
 				<div class="bg-zinc-800 p-8 rounded-2xl max-w-md text-center">
-					<h2 class="text-2xl font-semibold mb-2">Welcome to SDLXLIFF Editor</h2>
+					<h2 class="text-2xl font-semibold mb-2">Welcome to XLIFF Chat</h2>
 					<p class="text-zinc-500 mb-6">Enter your Anthropic API key to get started.</p>
 					<div class="flex gap-2">
 						<input

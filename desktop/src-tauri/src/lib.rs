@@ -12,18 +12,17 @@ struct McpServer {
 struct McpState(Mutex<McpServer>);
 
 #[tauri::command]
-fn spawn_mcp_server(
-    state: State<McpState>,
-    working_dir: String,
-) -> Result<String, String> {
+fn spawn_mcp_server(state: State<McpState>) -> Result<String, String> {
     let mut server = state.0.lock().map_err(|e| e.to_string())?;
 
     if server.child.is_some() {
         return Ok("Server already running".to_string());
     }
 
-    let mut child = Command::new("uv")
-        .args(["run", "--directory", &working_dir, "-m", "mcp_server_sdlxliff"])
+    // Run the installed mcp-server-sdlxliff package
+    // Requires: pip install mcp-server-sdlxliff (or uv pip install -e .)
+    let mut child = Command::new("python")
+        .args(["-m", "mcp_server_sdlxliff"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
