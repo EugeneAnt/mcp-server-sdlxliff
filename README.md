@@ -4,6 +4,15 @@
 
 Review translations, find errors, and make corrections through simple natural conversation - no manual XML editing required.
 
+## Two Ways to Use
+
+| Option | Best For | Claude Access |
+|--------|----------|---------------|
+| **[XLIFF Chat Desktop App](#xliff-chat-desktop-app)** | Professional users who want a dedicated app | API key (pay per use) |
+| **[Claude Desktop Extension](#claude-desktop-extension)** | Claude Pro/Team subscribers | Claude subscription |
+
+Both options use the same MCP server under the hood - choose based on how you prefer to access Claude.
+
 ## What You Can Do
 
 Just ask Claude in plain language:
@@ -12,54 +21,54 @@ Just ask Claude in plain language:
 - *"Find segments where the translation is much longer than the source"*
 - *"Fix segment 42 - change 'программа' to 'приложение'"*
 - *"Show me all segments that are still in Draft status"*
+- *"Run QA checks with my glossary"*
 - *"Save my changes"*
 
 Claude reads your SDLXLIFF files, understands the translation context, and can make corrections while preserving all formatting tags automatically.
 
-## Compatibility
+## XLIFF Chat Desktop App
 
-Works with **Claude Cowork** (Claude Desktop's project mode):
+A standalone macOS app with a native file picker - no command line required.
 
-| Product | Works? | Notes |
-|---------|--------|-------|
-| **Claude Cowork** | Yes | Add a folder with SDLXLIFF files and start chatting |
-| **Claude Desktop (chat)** | No | [Sandbox limitation](#claude-desktop-chat-limitation) prevents file access |
-| **Claude.ai (web)** | No | No local filesystem access |
+### Installation
 
-## Features
+1. Install the MCP server:
+   ```bash
+   pip install mcp-server-sdlxliff
+   ```
 
-- **Natural conversation** - Ask questions and request changes in plain language
-- **Error detection** - Find grammar, spelling, consistency, and terminology issues
-- **Safe corrections** - Edit translations while preserving all formatting tags
-- **Batch review** - Process large files with automatic pagination
-- **Change tracking** - Modified segments are marked as `RejectedTranslation` for easy review in Trados
+2. Download `XLIFF.Chat-1.0.0.dmg` from [Releases](https://github.com/EugeneAnt/mcp-server-sdlxliff/releases)
 
-## Human in the Loop
+3. Open the `.dmg` and drag XLIFF Chat to your Applications folder
 
-Claude's corrections are **suggestions, not final changes**. The workflow keeps you in control:
+4. Launch XLIFF Chat and enter your [Anthropic API key](https://console.anthropic.com/)
 
-1. Claude marks all modified segments as `RejectedTranslation`
-2. Open the file in SDL Trados Studio
-3. Filter by status → `RejectedTranslation` to see only Claude's changes
-4. Review each suggestion and **Confirm** or **Edit** as needed
-5. Your approved changes become `Translated` or `ApprovedTranslation`
+### Usage
 
-This ensures human oversight - you always have the final say on what goes into the translation.
+1. Click **File** or **Folder** button to select SDLXLIFF files
+2. The MCP server connects automatically
+3. Start chatting - ask Claude to review, check, or edit your translations
 
-## Installation
+### Requirements
 
-### Desktop Extension (Recommended)
+- macOS 10.15 or later
+- Python 3.10+ with `mcp-server-sdlxliff` installed
+- Anthropic API key
 
-The easiest way to install - no command line required:
+## Claude Desktop Extension
 
-1. Download `mcp-server-sdlxliff-X.X.X.mcpb` from [Releases](https://github.com/EugeneAnt/mcp-server-sdlxliff/releases)
+Use with your Claude Pro or Team subscription through Claude Cowork.
+
+### Installation
+
+**Option A: Desktop Extension (Recommended)**
+
+1. Download `mcp-server-sdlxliff-1.0.0.mcpb` from [Releases](https://github.com/EugeneAnt/mcp-server-sdlxliff/releases)
 2. Open Claude Desktop → Settings → Extensions
 3. Click "Install Extension" and select the downloaded `.mcpb` file
-4. The extension will install automatically (Python and dependencies are managed for you)
+4. The extension installs automatically (Python and dependencies are managed for you)
 
-### Using pip (For Developers)
-
-If you prefer manual installation:
+**Option B: Manual Installation**
 
 ```bash
 pip install mcp-server-sdlxliff
@@ -80,22 +89,41 @@ Then add to your `claude_desktop_config.json`:
 }
 ```
 
-### From Source (For Contributors)
-
-```bash
-git clone https://github.com/EugeneAnt/mcp-server-sdlxliff.git
-cd mcp-server-sdlxliff
-uv pip install -e ".[dev]"
-```
-
-## Usage
-
-### Claude Cowork
+### Usage with Claude Cowork
 
 1. Open Claude Cowork
 2. Click "+ Add folder" and select a folder containing your SDLXLIFF files
 3. The MCP tools will be available automatically
 4. Ask Claude to review or edit translations
+
+### Compatibility
+
+| Product | Works? | Notes |
+|---------|--------|-------|
+| **Claude Cowork** | Yes | Add a folder with SDLXLIFF files and start chatting |
+| **Claude Desktop (chat)** | No | [Sandbox limitation](#claude-desktop-chat-limitation) prevents file access |
+| **Claude.ai (web)** | No | No local filesystem access |
+
+## Features
+
+- **Natural conversation** - Ask questions and request changes in plain language
+- **Error detection** - Find grammar, spelling, consistency, and terminology issues
+- **QA checks** - Automated quality assurance with glossary support
+- **Safe corrections** - Edit translations while preserving all formatting tags
+- **Batch review** - Process large files with automatic pagination
+- **Change tracking** - Modified segments are marked as `RejectedTranslation` for easy review in Trados
+
+## Human in the Loop
+
+Claude's corrections are **suggestions, not final changes**. The workflow keeps you in control:
+
+1. Claude marks all modified segments as `RejectedTranslation`
+2. Open the file in SDL Trados Studio
+3. Filter by status → `RejectedTranslation` to see only Claude's changes
+4. Review each suggestion and **Confirm** or **Edit** as needed
+5. Your approved changes become `Translated` or `ApprovedTranslation`
+
+This ensures human oversight - you always have the final say on what goes into the translation.
 
 ## Available Tools
 
@@ -244,20 +272,6 @@ Single terms (without tab) mean the term must appear unchanged in the target.
 }
 ```
 
-## Usage Example
-
-In Claude Cowork, add a folder containing your SDLXLIFF files and prompt:
-
-```
-Read the SDLXLIFF file and check the translations for grammar errors
-```
-
-Claude will:
-1. Use `read_sdlxliff` to extract all segments
-2. Analyze translations for issues
-3. Use `update_sdlxliff_segment` to correct problematic segments
-4. Use `save_sdlxliff` to persist changes
-
 ## SDLXLIFF Format
 
 SDLXLIFF is SDL's extension of the XLIFF 1.2 standard, used by SDL Trados Studio. Key characteristics:
@@ -343,7 +357,7 @@ Claude Desktop Chat runs Claude in a **gVisor sandboxed container** for security
 └─────────────────────────────────────────┘
 ```
 
-**Workaround:** Use **Claude Cowork** instead, which grants MCP servers direct access to folders on your host machine.
+**Workaround:** Use **Claude Cowork** or **XLIFF Chat** instead, which have direct access to your local files.
 
 ## Development
 
@@ -375,6 +389,20 @@ mcpb pack .
 ```
 
 This creates `mcp-server-sdlxliff-X.X.X.mcpb` ready for installation in Claude Desktop.
+
+### Building the Desktop App
+
+```bash
+cd desktop
+
+# Install dependencies
+bun install
+
+# Build for macOS
+bun run tauri build
+```
+
+This creates `XLIFF Chat.dmg` in `desktop/src-tauri/target/release/bundle/dmg/`.
 
 ## License
 
