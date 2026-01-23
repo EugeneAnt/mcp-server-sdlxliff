@@ -32,10 +32,12 @@ A standalone macOS app with a native file picker - no command line required.
 
 ### Installation
 
-1. Install the MCP server:
+1. Install the MCP server **globally** (not in a virtual environment):
    ```bash
    pip install mcp-server-sdlxliff
    ```
+
+   > **Note:** The desktop app runs `python -m mcp_server_sdlxliff` to start the server. If you install in a virtual environment, the app won't be able to find it.
 
 2. Download `XLIFF.Chat-1.0.0.dmg` from [Releases](https://github.com/EugeneAnt/mcp-server-sdlxliff/releases)
 
@@ -52,7 +54,7 @@ A standalone macOS app with a native file picker - no command line required.
 ### Requirements
 
 - macOS 10.15 or later
-- Python 3.10+ with `mcp-server-sdlxliff` installed
+- Python 3.10+ with `mcp-server-sdlxliff` installed globally
 - Anthropic API key
 
 ## Claude Desktop Extension
