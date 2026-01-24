@@ -51,8 +51,8 @@
 	let sessionUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 	let lastRequestUsage: TokenUsage | null = null;
 
-	// Model selection
-	let selectedModel: ModelChoice = 'auto';
+	// Model selection (user choice, default Sonnet)
+	let selectedModel: ModelChoice = 'sonnet';
 	let currentModelUsed: string | null = null;
 
 	async function handleSelectFile() {
@@ -374,11 +374,10 @@ Be helpful and concise. Preserve formatting and tags in translations.`;
 				<select
 					bind:value={selectedModel}
 					title="Select AI model"
-					class="text-sm px-2 py-1 rounded bg-zinc-700 text-zinc-200 border border-zinc-600 focus:border-blue-500 focus:outline-none cursor-pointer"
+					class="text-sm px-2 py-1.5 rounded bg-zinc-700 text-zinc-200 border border-zinc-600 focus:border-blue-500 focus:outline-none cursor-pointer"
 				>
-					<option value="auto">Auto</option>
-					<option value="haiku">Haiku 4.5</option>
 					<option value="sonnet">Sonnet 4.5</option>
+					<option value="haiku">Haiku 4.5</option>
 				</select>
 				<button
 					onclick={tryConnectMcp}

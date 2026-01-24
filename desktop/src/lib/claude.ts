@@ -38,7 +38,7 @@ export interface StreamEvent {
 	usage?: TokenUsage;
 }
 
-export type ModelChoice = 'auto' | 'haiku' | 'sonnet';
+export type ModelChoice = 'haiku' | 'sonnet';
 
 interface ChatEvent {
 	event_type: string;
@@ -81,7 +81,7 @@ export async function* streamChatWithTools(
 	systemPrompt: string,
 	mcpTools?: Tool[],
 	onToolCall?: (toolUse: ToolUseBlock) => Promise<string>,
-	model: ModelChoice = 'auto'
+	model: ModelChoice = 'sonnet'
 ): AsyncGenerator<StreamEvent> {
 	const streamId = crypto.randomUUID();
 	const eventName = `chat-event-${streamId}`;
@@ -189,7 +189,7 @@ export async function* streamChatWithTools(
 						}
 					];
 
-					// Recursively continue the conversation
+					// Recursively continue the conversation with same model
 					for await (const continuedEvent of streamChatWithTools(
 						updatedMessages,
 						systemPrompt,

@@ -63,45 +63,10 @@ struct ChatRequest {
 const MODEL_HAIKU: &str = "claude-haiku-4-5-20251001";
 const MODEL_SONNET: &str = "claude-sonnet-4-5-20250929";
 
-fn select_model(requested: Option<&str>, messages: &[Message]) -> &'static str {
+fn select_model(requested: Option<&str>) -> &'static str {
     match requested {
         Some("haiku") => MODEL_HAIKU,
-        Some("sonnet") => MODEL_SONNET,
-        Some("auto") | None => {
-            // Auto-detect based on message content
-            // Use Sonnet for translation/QA tasks, Haiku for simple reads
-            let last_message = messages.last().and_then(|m| {
-                match &m.content {
-                    serde_json::Value::String(s) => Some(s.to_lowercase()),
-                    _ => None
-                }
-            });
-
-            if let Some(text) = last_message {
-                let needs_sonnet = text.contains("translat")
-                    || text.contains("перевод")
-                    || text.contains("übersetze")
-                    || text.contains("tradui")
-                    || text.contains("qa")
-                    || text.contains("quality")
-                    || text.contains("check")
-                    || text.contains("review")
-                    || text.contains("fix")
-                    || text.contains("correct")
-                    || text.contains("update")
-                    || text.contains("change")
-                    || text.contains("edit")
-                    || text.contains("improve");
-
-                if needs_sonnet {
-                    MODEL_SONNET
-                } else {
-                    MODEL_HAIKU
-                }
-            } else {
-                MODEL_SONNET // Default to Sonnet for complex content
-            }
-        }
+        Some("sonnet") | None => MODEL_SONNET, // Default to Sonnet
         _ => MODEL_SONNET,
     }
 }
@@ -293,8 +258,8 @@ async fn run_chat_stream(
     let stream_id = request.stream_id;
     let event_name = format!("chat-event-{}", stream_id);
 
-    // Select model based on request or auto-detect
-    let model = select_model(request.model.as_deref(), &request.messages);
+    // Select model based on user choice (default: Sonnet)
+    let model = select_model(request.model.as_deref());
     log::info!("Using model: {}", model);
 
     // Emit model selection event
