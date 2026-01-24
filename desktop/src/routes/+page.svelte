@@ -2,19 +2,26 @@
 	import { onMount, onDestroy } from 'svelte';
 	import {
 		initializeClient,
+		clearClient,
 		streamChatWithTools,
 		type ConversationMessage,
 		type ToolUseBlock,
-		type TokenUsage
+		type TokenUsage,
+		type ModelChoice
 	} from '$lib/claude';
 	import {
 		connectMcpServer,
 		disconnectMcpServer,
-		getMcpClient,
-		type McpClient
+		getMcpClient
 	} from '$lib/mcp-client';
 	import { selectSdlxliffFile, selectFolder, findSdlxliffFiles } from '$lib/file-picker';
-	import type Anthropic from '@anthropic-ai/sdk';
+	import { getApiKey, setApiKey, clearApiKey as clearStoredApiKey } from '$lib/settings';
+
+	interface Tool {
+		name: string;
+		description: string;
+		input_schema: Record<string, unknown>;
+	}
 
 	interface DisplayMessage {
 		role: 'user' | 'assistant' | 'tool';
@@ -33,7 +40,7 @@
 	let mcpConnected = false;
 	let mcpConnecting = false;
 	let mcpError = '';
-	let mcpTools: Anthropic.Tool[] = [];
+	let mcpTools: Tool[] = [];
 	let selectedPaths: string[] = [];
 	let folderFiles: string[] = [];
 	let showFileSelector = false;
@@ -43,6 +50,10 @@
 	// Token usage tracking
 	let sessionUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 	let lastRequestUsage: TokenUsage | null = null;
+
+	// Model selection
+	let selectedModel: ModelChoice = 'auto';
+	let currentModelUsed: string | null = null;
 
 	async function handleSelectFile() {
 		const path = await selectSdlxliffFile();
@@ -125,17 +136,16 @@ When working with SDLXLIFF files:
 Be helpful and concise. Preserve formatting and tags in translations.`;
 
 	onMount(async () => {
-		const storedKey = localStorage.getItem('anthropic_api_key');
+		const storedKey = await getApiKey();
 		if (storedKey) {
 			try {
 				apiKey = storedKey;
-				initializeClient(storedKey);
+				await initializeClient(storedKey);
 				showApiKeyInput = false;
 				await tryConnectMcp();
 			} catch (error) {
 				console.error('Failed to initialize from stored key:', error);
-				// Clear invalid key and show input
-				localStorage.removeItem('anthropic_api_key');
+				await clearStoredApiKey();
 				showApiKeyInput = true;
 			}
 		}
@@ -159,7 +169,7 @@ Be helpful and concise. Preserve formatting and tags in translations.`;
 		try {
 			const client = await connectMcpServer();
 			mcpConnected = client.isConnected();
-			mcpTools = client.getToolsForClaude() as Anthropic.Tool[];
+			mcpTools = client.getToolsForClaude();
 			console.log('MCP connected, tools:', mcpTools.map(t => t.name));
 		} catch (error) {
 			// Tauri errors can be strings or objects
@@ -176,11 +186,11 @@ Be helpful and concise. Preserve formatting and tags in translations.`;
 		mcpConnecting = false;
 	}
 
-	function saveApiKey() {
+	async function saveApiKey() {
 		if (apiKey.trim()) {
 			try {
-				localStorage.setItem('anthropic_api_key', apiKey.trim());
-				initializeClient(apiKey.trim());
+				await setApiKey(apiKey.trim());
+				await initializeClient(apiKey.trim());
 				showApiKeyInput = false;
 				tryConnectMcp();
 			} catch (error) {
@@ -190,8 +200,9 @@ Be helpful and concise. Preserve formatting and tags in translations.`;
 		}
 	}
 
-	function clearApiKey() {
-		localStorage.removeItem('anthropic_api_key');
+	async function clearApiKey() {
+		await clearStoredApiKey();
+		await clearClient();
 		apiKey = '';
 		showApiKeyInput = true;
 		disconnectMcpServer();
@@ -250,9 +261,12 @@ Be helpful and concise. Preserve formatting and tags in translations.`;
 				conversationMessages,
 				systemPrompt,
 				tools,
-				mcpConnected ? handleToolCall : undefined
+				mcpConnected ? handleToolCall : undefined,
+				selectedModel
 			)) {
-				if (event.type === 'text' && event.content) {
+				if (event.type === 'model_selected' && event.content) {
+					currentModelUsed = event.content;
+				} else if (event.type === 'text' && event.content) {
 					assistantMessage += event.content;
 
 					if (assistantDisplayIndex === -1) {
@@ -357,6 +371,15 @@ Be helpful and concise. Preserve formatting and tags in translations.`;
 					</svg>
 					<span class="text-xs">Folder</span>
 				</button>
+				<select
+					bind:value={selectedModel}
+					title="Select AI model"
+					class="text-sm px-2 py-1 rounded bg-zinc-700 text-zinc-200 border border-zinc-600 focus:border-blue-500 focus:outline-none cursor-pointer"
+				>
+					<option value="auto">Auto</option>
+					<option value="haiku">Haiku 4.5</option>
+					<option value="sonnet">Sonnet 4.5</option>
+				</select>
 				<button
 					onclick={tryConnectMcp}
 					disabled={mcpConnecting}
@@ -418,12 +441,19 @@ Be helpful and concise. Preserve formatting and tags in translations.`;
 	{/if}
 
 	<!-- Token Usage Bar -->
-	{#if sessionUsage.inputTokens > 0}
+	{#if sessionUsage.inputTokens > 0 || currentModelUsed}
 		<div class="flex items-center justify-between px-4 py-1.5 bg-zinc-800/30 border-b border-zinc-700/50 text-xs font-mono">
 			<div class="flex items-center gap-4 text-zinc-500">
-				<span title="Total tokens this session">
-					Session: <span class="text-zinc-400">{(sessionUsage.inputTokens + sessionUsage.outputTokens).toLocaleString()}</span> tokens
-				</span>
+				{#if currentModelUsed}
+					<span title="Model used for last request" class="text-blue-400">
+						{currentModelUsed.includes('haiku') ? 'Haiku' : currentModelUsed.includes('sonnet') ? 'Sonnet' : currentModelUsed}
+					</span>
+				{/if}
+				{#if sessionUsage.inputTokens > 0}
+					<span title="Total tokens this session">
+						Session: <span class="text-zinc-400">{(sessionUsage.inputTokens + sessionUsage.outputTokens).toLocaleString()}</span> tokens
+					</span>
+				{/if}
 				{#if sessionUsage.cacheReadTokens}
 					<span title="Tokens read from cache (90% cheaper)" class="text-green-500">
 						Cache hit: {sessionUsage.cacheReadTokens.toLocaleString()}

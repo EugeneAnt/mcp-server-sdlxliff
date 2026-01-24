@@ -1,28 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
-import { fetch } from '@tauri-apps/plugin-http';
-
-let anthropicClient: Anthropic | null = null;
-
-export function initializeClient(apiKey: string) {
-	// Use Tauri's fetch to bypass CORS restrictions
-	// dangerouslyAllowBrowser required for browser-like environments
-	anthropicClient = new Anthropic({
-		apiKey,
-		dangerouslyAllowBrowser: true,
-		fetch: fetch as unknown as typeof globalThis.fetch
-	});
-}
-
-export function getClient(): Anthropic {
-	if (!anthropicClient) {
-		throw new Error('AI provider not initialized. Please set your API key.');
-	}
-	return anthropicClient;
-}
-
-export function isClientInitialized(): boolean {
-	return anthropicClient !== null;
-}
+import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 export interface ToolUseBlock {
 	type: 'tool_use';
@@ -33,7 +10,17 @@ export interface ToolUseBlock {
 
 export interface ConversationMessage {
 	role: 'user' | 'assistant';
-	content: string;
+	content: string | ContentBlock[];
+}
+
+export interface ContentBlock {
+	type: string;
+	text?: string;
+	id?: string;
+	name?: string;
+	input?: Record<string, unknown>;
+	tool_use_id?: string;
+	content?: string;
 }
 
 export interface TokenUsage {
@@ -44,233 +31,190 @@ export interface TokenUsage {
 }
 
 export interface StreamEvent {
-	type: 'text' | 'tool_use' | 'tool_result' | 'done' | 'error' | 'usage';
+	type: 'text' | 'tool_use' | 'tool_result' | 'done' | 'error' | 'usage' | 'model_selected';
 	content?: string;
 	toolUse?: ToolUseBlock;
 	error?: string;
 	usage?: TokenUsage;
 }
 
-/**
- * Build tools array with cache control on the last tool
- * This creates a cache breakpoint that includes system + tools
- */
-function buildToolsWithCache(mcpTools: Anthropic.Tool[]): Anthropic.Tool[] {
-	return mcpTools.map((tool, index) => {
-		const isLastTool = index === mcpTools.length - 1;
-		if (isLastTool) {
-			// Add cache control to the last tool
-			return {
-				...tool,
-				cache_control: { type: 'ephemeral' as const }
-			};
-		}
-		return tool;
-	});
+export type ModelChoice = 'auto' | 'haiku' | 'sonnet';
+
+interface ChatEvent {
+	event_type: string;
+	content?: string;
+	tool_use?: {
+		id: string;
+		name: string;
+		input: Record<string, unknown>;
+	};
+	usage?: {
+		input_tokens: number;
+		output_tokens: number;
+		cache_read_tokens?: number;
+		cache_write_tokens?: number;
+	};
+	error?: string;
 }
 
-/**
- * Convert conversation messages to Anthropic format
- */
-function buildMessages(
-	messages: ConversationMessage[]
-): Anthropic.MessageParam[] {
-	return messages.map((m) => ({
-		role: m.role,
-		content: m.content
-	}));
+interface Tool {
+	name: string;
+	description: string;
+	input_schema: Record<string, unknown>;
 }
 
-/**
- * Build system prompt with cache control
- */
-function buildSystemWithCache(
-	systemPrompt: string
-): Anthropic.TextBlockParam[] {
-	return [
-		{
-			type: 'text',
-			text: systemPrompt,
-			cache_control: { type: 'ephemeral' }
-		}
-	];
+// API key is now managed by Rust - these functions sync with Rust state
+export async function initializeClient(apiKey: string): Promise<void> {
+	await invoke('set_api_key', { key: apiKey });
+}
+
+export async function clearClient(): Promise<void> {
+	await invoke('clear_api_key');
+}
+
+export async function isClientInitialized(): Promise<boolean> {
+	return await invoke<boolean>('has_api_key');
 }
 
 export async function* streamChatWithTools(
 	messages: ConversationMessage[],
 	systemPrompt: string,
-	mcpTools?: Anthropic.Tool[],
-	onToolCall?: (toolUse: ToolUseBlock) => Promise<string>
+	mcpTools?: Tool[],
+	onToolCall?: (toolUse: ToolUseBlock) => Promise<string>,
+	model: ModelChoice = 'auto'
 ): AsyncGenerator<StreamEvent> {
-	const client = getClient();
+	const streamId = crypto.randomUUID();
+	const eventName = `chat-event-${streamId}`;
 
-	console.log('[streamChatWithTools] Starting with', messages.length, 'messages');
-	console.log('[streamChatWithTools] Tools:', mcpTools?.map((t) => t.name));
+	// Convert messages to the format Rust expects
+	const rustMessages = messages.map((m) => ({
+		role: m.role,
+		content: m.content
+	}));
 
-	// Build tools with cache control on last tool
-	const tools = mcpTools?.length ? buildToolsWithCache(mcpTools) : undefined;
+	// Set up event listener
+	const events: StreamEvent[] = [];
+	let resolve: (() => void) | null = null;
+	let done = false;
 
-	// Build system prompt with cache control
-	const system = buildSystemWithCache(systemPrompt);
+	const unlisten = await listen<ChatEvent>(eventName, (event) => {
+		const payload = event.payload;
 
-	// Convert messages
-	let anthropicMessages = buildMessages(messages);
-
-	// Agentic loop - continue until no more tool calls
-	let continueLoop = true;
-	let totalUsage: TokenUsage = {
-		inputTokens: 0,
-		outputTokens: 0,
-		cacheReadTokens: 0,
-		cacheWriteTokens: 0
-	};
-
-	while (continueLoop) {
-		try {
-			console.log('[streamChatWithTools] Making API call...');
-
-			const stream = await client.messages.stream({
-				model: 'claude-sonnet-4-20250514',
-				max_tokens: 8192,
-				system,
-				messages: anthropicMessages,
-				tools
+		if (payload.event_type === 'model_selected' && payload.content) {
+			events.push({ type: 'model_selected', content: payload.content });
+		} else if (payload.event_type === 'text' && payload.content) {
+			events.push({ type: 'text', content: payload.content });
+		} else if (payload.event_type === 'tool_use' && payload.tool_use) {
+			events.push({
+				type: 'tool_use',
+				toolUse: {
+					type: 'tool_use',
+					id: payload.tool_use.id,
+					name: payload.tool_use.name,
+					input: payload.tool_use.input
+				}
 			});
-
-			let currentText = '';
-			const toolCalls: ToolUseBlock[] = [];
-			let currentToolUse: Partial<ToolUseBlock> | null = null;
-			let toolInputJson = '';
-
-			// Process stream events
-			for await (const event of stream) {
-				if (event.type === 'content_block_start') {
-					if (event.content_block.type === 'text') {
-						currentText = '';
-					} else if (event.content_block.type === 'tool_use') {
-						currentToolUse = {
-							type: 'tool_use',
-							id: event.content_block.id,
-							name: event.content_block.name,
-							input: {}
-						};
-						toolInputJson = '';
-					}
-				} else if (event.type === 'content_block_delta') {
-					if (event.delta.type === 'text_delta') {
-						currentText += event.delta.text;
-						yield { type: 'text', content: event.delta.text };
-					} else if (event.delta.type === 'input_json_delta') {
-						toolInputJson += event.delta.partial_json;
-					}
-				} else if (event.type === 'content_block_stop') {
-					if (currentToolUse && toolInputJson) {
-						try {
-							currentToolUse.input = JSON.parse(toolInputJson);
-						} catch {
-							currentToolUse.input = {};
-						}
-						toolCalls.push(currentToolUse as ToolUseBlock);
-						currentToolUse = null;
-						toolInputJson = '';
-					}
-				} else if (event.type === 'message_delta') {
-					// Message finished - check stop reason
-					if (event.delta.stop_reason === 'end_turn') {
-						continueLoop = false;
-					}
-				} else if (event.type === 'message_start') {
-					// Extract usage from message start
-					const usage = event.message.usage;
-					if (usage) {
-						totalUsage.inputTokens += usage.input_tokens || 0;
-						totalUsage.cacheReadTokens =
-							(totalUsage.cacheReadTokens || 0) +
-							(usage.cache_read_input_tokens || 0);
-						totalUsage.cacheWriteTokens =
-							(totalUsage.cacheWriteTokens || 0) +
-							(usage.cache_creation_input_tokens || 0);
-					}
+		} else if (payload.event_type === 'usage' && payload.usage) {
+			events.push({
+				type: 'usage',
+				usage: {
+					inputTokens: payload.usage.input_tokens,
+					outputTokens: payload.usage.output_tokens,
+					cacheReadTokens: payload.usage.cache_read_tokens,
+					cacheWriteTokens: payload.usage.cache_write_tokens
 				}
-			}
-
-			// Get final message for output tokens
-			const finalMessage = await stream.finalMessage();
-			totalUsage.outputTokens += finalMessage.usage?.output_tokens || 0;
-
-			// Log usage for this turn
-			console.log('[Token Usage - Turn]', {
-				input: finalMessage.usage?.input_tokens,
-				output: finalMessage.usage?.output_tokens,
-				cacheRead: finalMessage.usage?.cache_read_input_tokens || 0,
-				cacheWrite: finalMessage.usage?.cache_creation_input_tokens || 0
 			});
-
-			// Handle tool calls if any
-			if (toolCalls.length > 0 && onToolCall) {
-				console.log('[streamChatWithTools] Processing', toolCalls.length, 'tool calls');
-
-				// Add assistant message with tool use
-				const assistantContent: Anthropic.ContentBlockParam[] = [];
-				if (currentText) {
-					assistantContent.push({ type: 'text', text: currentText });
-				}
-				for (const tc of toolCalls) {
-					assistantContent.push({
-						type: 'tool_use',
-						id: tc.id,
-						name: tc.name,
-						input: tc.input
-					});
-				}
-				anthropicMessages = [
-					...anthropicMessages,
-					{ role: 'assistant', content: assistantContent }
-				];
-
-				// Execute tools and collect results
-				const toolResults: Anthropic.ToolResultBlockParam[] = [];
-				for (const tc of toolCalls) {
-					yield { type: 'tool_use', toolUse: tc };
-					const result = await onToolCall(tc);
-					yield { type: 'tool_result', content: result.slice(0, 500) + '...' };
-					toolResults.push({
-						type: 'tool_result',
-						tool_use_id: tc.id,
-						content: result
-					});
-				}
-
-				// Add tool results as user message
-				anthropicMessages = [
-					...anthropicMessages,
-					{ role: 'user', content: toolResults }
-				];
-
-				// Continue the loop for next turn
-				continueLoop = true;
-			} else {
-				// No tool calls, we're done
-				continueLoop = false;
-			}
-		} catch (error) {
-			console.error('[streamChatWithTools] Error:', error);
-			yield {
-				type: 'error',
-				error: error instanceof Error ? error.message : 'An error occurred'
-			};
-			continueLoop = false;
+		} else if (payload.event_type === 'done') {
+			events.push({ type: 'done' });
+			done = true;
+		} else if (payload.event_type === 'error' && payload.error) {
+			events.push({ type: 'error', error: payload.error });
+			done = true;
 		}
-	}
 
-	// Yield final usage
-	console.log('[Token Usage - Total]', {
-		input: totalUsage.inputTokens,
-		output: totalUsage.outputTokens,
-		cacheRead: totalUsage.cacheReadTokens || 0,
-		cacheWrite: totalUsage.cacheWriteTokens || 0
+		if (resolve) {
+			resolve();
+			resolve = null;
+		}
 	});
 
-	yield { type: 'usage', usage: totalUsage };
-	yield { type: 'done' };
+	try {
+		// Start the stream
+		await invoke('chat_stream', {
+			request: {
+				messages: rustMessages,
+				system_prompt: systemPrompt,
+				tools: mcpTools,
+				stream_id: streamId,
+				model: model
+			}
+		});
+
+		// Yield events as they arrive
+		while (!done || events.length > 0) {
+			if (events.length > 0) {
+				const event = events.shift()!;
+
+				// Handle tool calls with the agentic loop
+				if (event.type === 'tool_use' && event.toolUse && onToolCall) {
+					yield event;
+
+					// Execute the tool
+					const result = await onToolCall(event.toolUse);
+					yield { type: 'tool_result', content: result.slice(0, 500) + '...' };
+
+					// Continue the conversation with tool result
+					const updatedMessages: ConversationMessage[] = [
+						...messages,
+						{
+							role: 'assistant',
+							content: [
+								{
+									type: 'tool_use',
+									id: event.toolUse.id,
+									name: event.toolUse.name,
+									input: event.toolUse.input
+								}
+							]
+						},
+						{
+							role: 'user',
+							content: [
+								{
+									type: 'tool_result',
+									tool_use_id: event.toolUse.id,
+									content: result
+								}
+							]
+						}
+					];
+
+					// Recursively continue the conversation
+					for await (const continuedEvent of streamChatWithTools(
+						updatedMessages,
+						systemPrompt,
+						mcpTools,
+						onToolCall,
+						model
+					)) {
+						yield continuedEvent;
+					}
+					return;
+				}
+
+				yield event;
+
+				if (event.type === 'done' || event.type === 'error') {
+					return;
+				}
+			} else if (!done) {
+				// Wait for more events
+				await new Promise<void>((r) => {
+					resolve = r;
+				});
+			}
+		}
+	} finally {
+		unlisten();
+	}
 }

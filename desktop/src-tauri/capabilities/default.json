@@ -31,6 +31,11 @@
       "allow": [
         { "url": "https://api.anthropic.com/**" }
       ]
-    }
+    },
+    "store:allow-get",
+    "store:allow-set",
+    "store:allow-delete",
+    "store:allow-load",
+    "store:allow-save"
   ]
 }
