@@ -12,7 +12,7 @@ Provides stateless QA check functions that detect common translation issues:
 """
 
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -106,26 +106,39 @@ def check_numbers(
     target: str
 ) -> Optional[QAIssue]:
     """
-    Check if all numbers from source appear in target.
+    Check if all numbers from source appear in target with same frequency.
 
-    Returns an issue if numbers don't match (missing or extra).
-    Numbers are compared as sets, so order doesn't matter.
+    Returns an issue if numbers don't match (missing, extra, or wrong count).
+    Uses Counter to detect duplicate number mismatches (e.g., "50 50" vs "50").
     """
     if not source or not target:
         return None
 
-    source_numbers = set(NUMBER_PATTERN.findall(source))
-    target_numbers = set(NUMBER_PATTERN.findall(target))
+    source_numbers = Counter(NUMBER_PATTERN.findall(source))
+    target_numbers = Counter(NUMBER_PATTERN.findall(target))
 
     if source_numbers != target_numbers:
-        missing = source_numbers - target_numbers
-        extra = target_numbers - source_numbers
-
         parts = []
-        if missing:
-            parts.append(f"missing: {', '.join(sorted(missing))}")
-        if extra:
-            parts.append(f"extra: {', '.join(sorted(extra))}")
+
+        # Find missing numbers (in source but not enough in target)
+        for num, count in source_numbers.items():
+            target_count = target_numbers.get(num, 0)
+            if target_count < count:
+                diff = count - target_count
+                if diff == count:
+                    parts.append(f"missing: {num}" + (f" (x{count})" if count > 1 else ""))
+                else:
+                    parts.append(f"missing: {num} (need {count}, have {target_count})")
+
+        # Find extra numbers (in target but not enough in source)
+        for num, count in target_numbers.items():
+            source_count = source_numbers.get(num, 0)
+            if count > source_count:
+                diff = count - source_count
+                if source_count == 0:
+                    parts.append(f"extra: {num}" + (f" (x{count})" if count > 1 else ""))
+                else:
+                    parts.append(f"extra: {num} (have {count}, need {source_count})")
 
         return QAIssue(
             segment_id=segment_id,
@@ -417,6 +430,9 @@ def check_terminology(
     """
     Check that glossary terms from source appear correctly in target.
 
+    Verifies both presence and frequency - if a term appears twice in source,
+    it should appear twice in target.
+
     Args:
         segment_id: The segment ID
         source: Source text
@@ -424,7 +440,7 @@ def check_terminology(
         terms: List of (source_term, target_term) tuples from glossary
 
     Returns:
-        List of QAIssue for any missing terms
+        List of QAIssue for any missing or mismatched terms
     """
     issues: List[QAIssue] = []
 
@@ -432,15 +448,32 @@ def check_terminology(
         return issues
 
     for source_term, target_term in terms:
-        # Check if source contains this term (case-sensitive)
-        if source_term in source:
-            # Check if target contains the expected target term
-            if target_term not in target:
+        # Count occurrences of source term in source text
+        source_count = source.count(source_term)
+        if source_count > 0:
+            # Count occurrences of target term in target text
+            target_count = target.count(target_term)
+
+            if target_count == 0:
+                # Term completely missing
+                msg = f"Term '{source_term}' found in source but '{target_term}' missing in target"
+                if source_count > 1:
+                    msg = f"Term '{source_term}' appears {source_count}x in source but '{target_term}' missing in target"
                 issues.append(QAIssue(
                     segment_id=segment_id,
                     check="terminology",
                     severity="warning",
-                    message=f"Term '{source_term}' found in source but '{target_term}' missing in target",
+                    message=msg,
+                    source_excerpt=_excerpt(source),
+                    target_excerpt=_excerpt(target),
+                ))
+            elif target_count < source_count:
+                # Term present but not enough times
+                issues.append(QAIssue(
+                    segment_id=segment_id,
+                    check="terminology",
+                    severity="warning",
+                    message=f"Term count mismatch: '{source_term}' appears {source_count}x in source but '{target_term}' only {target_count}x in target",
                     source_excerpt=_excerpt(source),
                     target_excerpt=_excerpt(target),
                 ))

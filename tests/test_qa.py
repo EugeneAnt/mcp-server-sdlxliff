@@ -149,6 +149,25 @@ class TestNumbers:
         issue = check_numbers("1", "", "")
         assert issue is None
 
+    def test_duplicate_numbers_match(self):
+        """No issue when duplicate numbers match."""
+        issue = check_numbers("1", "Pay 50 50", "Платить 50 50")
+        assert issue is None
+
+    def test_duplicate_numbers_missing(self):
+        """Issue when duplicate number appears only once in target."""
+        issue = check_numbers("1", "Pay 50 50", "Платить 50")
+        assert issue is not None
+        assert "50" in issue.message
+        assert "missing" in issue.message.lower() or "need" in issue.message.lower()
+
+    def test_duplicate_numbers_extra(self):
+        """Issue when number appears more times in target than source."""
+        issue = check_numbers("1", "Pay 50", "Платить 50 50")
+        assert issue is not None
+        assert "50" in issue.message
+        assert "extra" in issue.message.lower() or "have" in issue.message.lower()
+
 
 class TestDoubleSpaces:
     """Tests for double space check."""
@@ -676,6 +695,26 @@ class TestCheckTerminology:
         assert len(issues) == 1
         assert "Settings" in issues[0].message
         assert "Настройки" in issues[0].message
+
+    def test_duplicate_term_match(self):
+        """No issue when term appears same number of times in both."""
+        terms = [("Galaxy", "Galaxy")]
+        issues = check_terminology("1", "Galaxy Galaxy phone", "телефон Galaxy Galaxy", terms)
+        assert len(issues) == 0
+
+    def test_duplicate_term_missing(self):
+        """Issue when term appears twice in source but once in target."""
+        terms = [("Galaxy", "Galaxy")]
+        issues = check_terminology("1", "Galaxy Galaxy phone", "телефон Galaxy", terms)
+        assert len(issues) == 1
+        assert "2x" in issues[0].message or "count" in issues[0].message.lower()
+
+    def test_duplicate_translated_term_missing(self):
+        """Issue when translated term appears fewer times."""
+        terms = [("Settings", "Настройки")]
+        issues = check_terminology("1", "Settings and Settings", "Настройки и что-то", terms)
+        assert len(issues) == 1
+        assert "2x" in issues[0].message or "count" in issues[0].message.lower()
 
     def test_empty_terms_list(self):
         """No issues with empty terms list."""

@@ -455,7 +455,11 @@ class SDLXLIFFParser:
         mrk.text = target_text
 
         # Update SDL confirmation level for this specific segment
+        # Use base ID fallback for split segments (e.g., "81_x0020_a" -> "81")
         sdl_seg = self._find_sdl_seg_by_id(segment_id)
+        if sdl_seg is None:
+            base_id = self._get_base_segment_id(segment_id)
+            sdl_seg = self._find_sdl_seg_by_id(base_id)
         if sdl_seg is not None:
             sdl_seg.set('conf', 'RejectedTranslation')
 
@@ -472,7 +476,11 @@ class SDLXLIFFParser:
         Returns:
             True if segment was found and updated, False otherwise
         """
+        # Use base ID fallback for split segments (e.g., "81_x0020_a" -> "81")
         sdl_seg = self._find_sdl_seg_by_id(segment_id)
+        if sdl_seg is None:
+            base_id = self._get_base_segment_id(segment_id)
+            sdl_seg = self._find_sdl_seg_by_id(base_id)
         if sdl_seg is None:
             return False
 
@@ -588,7 +596,11 @@ class SDLXLIFFParser:
             mrk.text = target_text
 
         # Update SDL confirmation level
+        # Use base ID fallback for split segments (e.g., "81_x0020_a" -> "81")
         sdl_seg = self._find_sdl_seg_by_id(segment_id)
+        if sdl_seg is None:
+            base_id = self._get_base_segment_id(segment_id)
+            sdl_seg = self._find_sdl_seg_by_id(base_id)
         if sdl_seg is not None:
             sdl_seg.set('conf', 'RejectedTranslation')
 
