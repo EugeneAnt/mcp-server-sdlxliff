@@ -2,7 +2,14 @@
 	import { sessionUsage, lastRequestUsage } from '$lib/stores/chat';
 	import { currentModelDisplayName } from '$lib/stores/models';
 	import { ragEnabled } from '$lib/stores/settings';
-	import { ragInitialized, ragIndexedSegments, ragLastSearchResults, ragIndexing } from '$lib/services/ragService';
+	import {
+		ragInitialized,
+		ragIndexedSegments,
+		ragLastSearchResults,
+		ragIndexing,
+		ragSearchCount,
+		ragTokensUsed
+	} from '$lib/services/ragService';
 </script>
 
 {#if $sessionUsage.inputTokens > 0 || $currentModelDisplayName || ($ragEnabled && $ragInitialized)}
@@ -29,18 +36,20 @@
 				</span>
 			{/if}
 			{#if $ragEnabled && $ragInitialized}
-				<span title="RAG semantic search enabled" class="text-purple-400">
+				<span title="RAG semantic search - segments indexed for search" class="text-purple-400">
 					{#if $ragIndexing}
 						RAG: <span class="animate-pulse">indexing...</span>
 					{:else if $ragIndexedSegments > 0}
-						RAG: {$ragIndexedSegments.toLocaleString()} indexed
-						{#if $ragLastSearchResults > 0}
-							<span class="text-purple-300">({$ragLastSearchResults} matches)</span>
-						{/if}
+						RAG: {$ragIndexedSegments} indexed
 					{:else}
 						RAG: ready
 					{/if}
 				</span>
+				{#if $ragSearchCount > 0}
+					<span title="RAG searches performed this session" class="text-purple-300">
+						{$ragSearchCount} search{$ragSearchCount !== 1 ? 'es' : ''} (~{$ragTokensUsed.toLocaleString()} tokens)
+					</span>
+				{/if}
 			{/if}
 		</div>
 		{#if $lastRequestUsage}

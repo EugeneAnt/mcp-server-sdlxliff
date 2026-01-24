@@ -30,6 +30,8 @@ export const ragError = writable('');
 // RAG stats for status line
 export const ragIndexedSegments = writable(0);
 export const ragLastSearchResults = writable(0);
+export const ragSearchCount = writable(0); // Number of rag_search calls this session
+export const ragTokensUsed = writable(0); // Approximate tokens returned by RAG this session
 
 // RAG context for tools panel (full search results)
 export const ragLastContext = writable<SearchResult[]>([]);
