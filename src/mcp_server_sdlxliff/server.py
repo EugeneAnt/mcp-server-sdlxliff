@@ -136,6 +136,16 @@ async def list_tools() -> list[Tool]:
                         ),
                         "default": False,
                     },
+                    "max_percent": {
+                        "type": "integer",
+                        "description": (
+                            "Filter to exclude high-match segments. Only returns segments with "
+                            "match percent <= this value (or no percent). "
+                            "Example: max_percent=99 excludes 100% TM matches. "
+                            "Use when client requests not to touch pre-translated/approved 100% segments. "
+                            "Default: no filtering (returns all segments)."
+                        ),
+                    },
                 },
                 "required": ["file_path"],
             },
@@ -354,12 +364,21 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             include_tags = arguments.get("include_tags", False)
             offset = arguments.get("offset", 0)
             limit = arguments.get("limit")  # None means all
-            logger.info(f"read_sdlxliff: file_path={file_path}, include_tags={include_tags}, offset={offset}, limit={limit}")
+            max_percent = arguments.get("max_percent")  # None means no filtering
+            logger.info(f"read_sdlxliff: file_path={file_path}, include_tags={include_tags}, offset={offset}, limit={limit}, max_percent={max_percent}")
             logger.info(f"CWD: {os.getcwd()}")
 
             parser = get_parser(file_path)
             all_segments = parser.extract_segments()
             total_count = len(all_segments)
+
+            # Apply percent filter if specified
+            if max_percent is not None:
+                all_segments = [
+                    seg for seg in all_segments
+                    if seg.get('percent') is None or seg.get('percent') <= max_percent
+                ]
+                logger.info(f"After max_percent={max_percent} filter: {len(all_segments)} segments (was {total_count})")
             logger.info(f"Extracted {total_count} segments")
 
             # Enforce maximum limit to prevent token overflow
@@ -378,13 +397,17 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     seg.pop('target_tagged', None)
 
             # Build response with pagination metadata
+            filtered_count = len(all_segments) if max_percent is not None else total_count
             response = {
                 "total_segments": total_count,
+                "filtered_segments": filtered_count if max_percent is not None else None,
                 "offset": offset,
                 "count": len(segments),
-                "has_more": (offset + len(segments)) < total_count,
+                "has_more": (offset + len(segments)) < filtered_count,
                 "segments": segments,
             }
+            # Remove null fields to save tokens
+            response = {k: v for k, v in response.items() if v is not None}
 
             return [
                 TextContent(

@@ -253,9 +253,14 @@ class SDLXLIFFParser:
         if seg_defs is not None:
             for seg in seg_defs.findall('sdl:seg', self.namespaces):
                 seg_id = seg.get('id')
+                # Parse percent as integer if present
+                percent_str = seg.get('percent')
+                percent = int(percent_str) if percent_str else None
                 seg_map[seg_id] = {
                     'conf': seg.get('conf'),
-                    'locked': seg.get('locked') == 'true'
+                    'locked': seg.get('locked') == 'true',
+                    'percent': percent,
+                    'origin': seg.get('origin'),
                 }
 
         # Extract each mrk segment from target
@@ -297,6 +302,16 @@ class SDLXLIFFParser:
                         'status': seg_info.get('conf'),
                         'locked': seg_info.get('locked', False),
                     }
+
+                    # Add percent only when present (to minimize token overhead)
+                    percent = seg_info.get('percent')
+                    if percent is not None:
+                        segment_data['percent'] = percent
+
+                    # Add origin only when present (to minimize token overhead)
+                    origin = seg_info.get('origin')
+                    if origin:
+                        segment_data['origin'] = origin
 
                     # Add repetitions count only when > 1 (to minimize token overhead)
                     rep_count = self._repetition_counts.get((tu_id, mid))
@@ -644,6 +659,11 @@ class SDLXLIFFParser:
         status = sdl_seg.get('conf') if sdl_seg is not None else None
         locked = sdl_seg.get('locked') == 'true' if sdl_seg is not None else False
 
+        # Get percent and origin
+        percent_str = sdl_seg.get('percent') if sdl_seg is not None else None
+        percent = int(percent_str) if percent_str else None
+        origin = sdl_seg.get('origin') if sdl_seg is not None else None
+
         segment_data = {
             'segment_id': segment_id,
             'trans_unit_id': tu_id,
@@ -655,6 +675,14 @@ class SDLXLIFFParser:
             'status': status,
             'locked': locked,
         }
+
+        # Add percent only when present (to minimize token overhead)
+        if percent is not None:
+            segment_data['percent'] = percent
+
+        # Add origin only when present (to minimize token overhead)
+        if origin:
+            segment_data['origin'] = origin
 
         # Add repetitions count only when > 1 (to minimize token overhead)
         rep_count = self._repetition_counts.get((tu_id, segment_id))
