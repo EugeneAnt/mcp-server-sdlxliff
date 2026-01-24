@@ -160,6 +160,9 @@ Each segment contains:
 - `target_tagged`: Target with tag placeholders (only if `has_tags=true` and `include_tags=true`)
 - `status`: SDL confirmation level (e.g., `Translated`, `RejectedTranslation`)
 - `locked`: Whether segment is locked
+- `percent`: TM match percentage, e.g., `100` for exact match (only present when available)
+- `origin`: Match origin, e.g., `tm`, `document-match`, `auto-propagated` (only present when available)
+- `text_match`: Context Match indicator - value `SourceAndTarget` means this is a CM (only present for context matches)
 - `repetitions`: Number of times this source text appears in the file (only present when > 1)
 
 ### `get_sdlxliff_segment`
