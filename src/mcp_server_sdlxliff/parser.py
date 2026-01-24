@@ -529,12 +529,27 @@ class SDLXLIFFParser:
 
         # Check if segment has tags and we should preserve them
         if preserve_tags:
-            # Ensure we have the original element cached
-            if segment_id not in self._original_mrk_elements:
+            # Get tag structure from SOURCE segment (not target) - source has the original tags
+            source_content = {'has_tags': False, 'tag_map': {}, 'tagged_text': ''}
+            source_mrk = None
+
+            seg_source_elem = trans_unit.find('xliff:seg-source', self.namespaces)
+            if seg_source_elem is not None:
+                for src_mrk in seg_source_elem.findall('.//xliff:mrk[@mtype="seg"]', self.namespaces):
+                    if src_mrk.get('mid') == segment_id:
+                        source_mrk = src_mrk
+                        source_content = extract_content_with_tags(src_mrk)
+                        break
+
+            # Cache source mrk for tag reconstruction
+            if segment_id not in self._original_mrk_elements and source_mrk is not None:
+                self._original_mrk_elements[segment_id] = (trans_unit.get('id'), deepcopy(source_mrk))
+            elif segment_id not in self._original_mrk_elements:
                 self._original_mrk_elements[segment_id] = (trans_unit.get('id'), deepcopy(mrk))
 
             _, original_mrk = self._original_mrk_elements[segment_id]
-            original_content = extract_content_with_tags(original_mrk)
+            # Use source_content for tag_map (has the original tag definitions)
+            original_content = source_content if source_content['has_tags'] else extract_content_with_tags(original_mrk)
 
             # Check if the text appears to contain placeholder tags
             has_placeholders = bool(re.search(r'\{/?(\d+|x:\d+)\}', target_text))
