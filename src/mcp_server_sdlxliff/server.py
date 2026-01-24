@@ -407,6 +407,11 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     )
                 ]
 
+            # Strip tagged fields if segment has no tags (saves tokens)
+            if not segment.get('has_tags', False):
+                segment.pop('source_tagged', None)
+                segment.pop('target_tagged', None)
+
             return [
                 TextContent(
                     type="text",
