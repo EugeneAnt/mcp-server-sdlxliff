@@ -345,6 +345,15 @@ async def list_tools() -> list[Tool]:
                             "in same directory as SDLXLIFF file."
                         ),
                     },
+                    "max_percent": {
+                        "type": "integer",
+                        "description": (
+                            "Filter to exclude high-match segments from QA. Only checks segments with "
+                            "match percent <= this value (or no percent). "
+                            "Example: max_percent=99 skips QA on 100% TM matches. "
+                            "Use when client requests not to touch pre-translated segments."
+                        ),
+                    },
                 },
                 "required": ["file_path"],
             },
@@ -541,9 +550,19 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             segment_ids = arguments.get("segment_ids")
             checks = arguments.get("checks")
             glossary_path = arguments.get("glossary_path")
+            max_percent = arguments.get("max_percent")
 
             parser = get_parser(file_path)
             all_segments = parser.extract_segments()
+            total_count = len(all_segments)
+
+            # Apply percent filter if specified
+            if max_percent is not None:
+                all_segments = [
+                    seg for seg in all_segments
+                    if seg.get('percent') is None or seg.get('percent') <= max_percent
+                ]
+                logger.info(f"QA: After max_percent={max_percent} filter: {len(all_segments)} segments (was {total_count})")
 
             # Filter segments if specific IDs provided
             if segment_ids:
@@ -576,7 +595,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
             # Convert to JSON-serializable format
             response = {
-                "total_segments": report.total_segments,
+                "total_segments": total_count,
                 "segments_checked": report.segments_checked,
                 "segments_with_issues": report.segments_with_issues,
                 "issues": [
@@ -592,6 +611,11 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 ],
                 "summary": report.summary,
             }
+
+            # Add filter info if applied
+            if max_percent is not None:
+                response["filtered_by_max_percent"] = max_percent
+                response["segments_excluded"] = total_count - len(all_segments)
 
             # Add glossary info to response
             if used_glossary_path:
