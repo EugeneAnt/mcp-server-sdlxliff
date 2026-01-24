@@ -104,8 +104,10 @@ async def list_tools() -> list[Tool]:
             name="read_sdlxliff",
             description=(
                 "Extract translation segments from an SDLXLIFF file. "
-                "Returns segment IDs, source text, target text, status, and locked state. "
+                "Returns segment IDs, source text, target text, status, locked state, percent (TM match), and origin. "
                 "Maximum 50 segments per request (enforced). Use offset parameter to paginate through large files. "
+                "Filtering: use max_percent to exclude high TM matches (e.g., max_percent=99 excludes 100% matches), "
+                "use skip_cm=true to exclude Context Matches. "
                 "Use include_tags=true only when you need to UPDATE segments with formatting tags. "
                 "ALWAYS use this tool to read SDLXLIFF files - DO NOT write Python code to parse XML."
             ),
@@ -308,6 +310,8 @@ async def list_tools() -> list[Tool]:
                 "and terminology (glossary compliance). "
                 "For terminology check: auto-discovers glossary.tsv/txt in same folder as SDLXLIFF, "
                 "or specify explicit glossary_path. "
+                "Filtering: use max_percent to skip high TM matches (e.g., max_percent=99 excludes 100% matches), "
+                "use skip_cm=true to exclude Context Matches. "
                 "Use for: 'check translation quality', 'find errors', 'are translations consistent', "
                 "'run QA', 'verify before delivery', 'check terminology', 'verify glossary'."
             ),
