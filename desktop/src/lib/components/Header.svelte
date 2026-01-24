@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ModelSelect from './ModelSelect.svelte';
+	import RagSettings from './RagSettings.svelte';
 	import { showApiKeyInput } from '$lib/stores/settings';
 	import { mcpConnected, mcpConnecting, mcpError, mcpTools } from '$lib/stores/mcp';
 	import { handleSelectFile, handleSelectFolder } from '$lib/services/fileService';
@@ -42,6 +43,7 @@
 				<span class="text-xs">Folder</span>
 			</button>
 			<ModelSelect />
+			<RagSettings />
 			<button
 				onclick={tryConnectMcp}
 				disabled={$mcpConnecting}

@@ -8,6 +8,21 @@ import {
 	pendingSelection,
 	resetFiles
 } from '$lib/stores/files';
+import { indexFile, ragInitialized } from '$lib/services/ragService';
+import { ragEnabled } from '$lib/stores/settings';
+
+// Helper to index files for RAG (non-blocking)
+async function indexFilesForRag(paths: string[]): Promise<void> {
+	if (!get(ragEnabled) || !get(ragInitialized)) return;
+
+	for (const path of paths) {
+		try {
+			await indexFile(path);
+		} catch (error) {
+			console.warn('RAG indexing failed for:', path, error);
+		}
+	}
+}
 
 export async function handleSelectFile(): Promise<void> {
 	const path = await selectSdlxliffFile();
@@ -17,6 +32,9 @@ export async function handleSelectFile(): Promise<void> {
 		showFileSelector.set(false);
 		currentFolder.set(null);
 		pendingSelection.set(new Set());
+
+		// Index for RAG (non-blocking)
+		indexFilesForRag([path]);
 	}
 }
 
@@ -33,6 +51,9 @@ export async function handleSelectFolder(): Promise<void> {
 			selectedPaths.set([files[0]]);
 			folderFiles.set([]);
 			showFileSelector.set(false);
+
+			// Index for RAG (non-blocking)
+			indexFilesForRag([files[0]]);
 		} else {
 			folderFiles.set(files);
 			showFileSelector.set(true);
@@ -56,9 +77,13 @@ export function toggleFileSelection(filePath: string): void {
 export function confirmFileSelection(): void {
 	const pending = get(pendingSelection);
 	if (pending.size > 0) {
-		selectedPaths.set(Array.from(pending).sort());
+		const paths = Array.from(pending).sort();
+		selectedPaths.set(paths);
 		showFileSelector.set(false);
 		pendingSelection.set(new Set());
+
+		// Index for RAG (non-blocking)
+		indexFilesForRag(paths);
 	}
 }
 

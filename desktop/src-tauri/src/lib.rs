@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -7,6 +8,9 @@ use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
+
+mod rag;
+use rag::{RagState, Segment, SearchResult};
 
 // ============================================================================
 // MCP Server State
@@ -478,6 +482,90 @@ async fn run_chat_stream(
 }
 
 // ============================================================================
+// RAG Commands
+// ============================================================================
+
+#[derive(Deserialize)]
+struct RagInitRequest {
+    api_key: Option<String>,
+    use_ollama: bool,
+}
+
+#[tauri::command]
+fn rag_init(state: State<RagState>, request: RagInitRequest) -> Result<String, String> {
+    rag::init_client(&state, request.api_key, request.use_ollama)?;
+    Ok("RAG initialized".to_string())
+}
+
+#[derive(Deserialize)]
+struct RagIndexRequest {
+    file_path: String,
+    file_hash: String,
+    segments: Vec<Segment>,
+}
+
+#[tauri::command]
+async fn rag_index(state: State<'_, RagState>, request: RagIndexRequest) -> Result<usize, String> {
+    rag::index_segments(&state, request.file_path, request.file_hash, request.segments).await
+}
+
+#[derive(Deserialize)]
+struct RagSearchRequest {
+    file_path: String,
+    query: String,
+    limit: Option<usize>,
+}
+
+#[tauri::command]
+async fn rag_search(
+    state: State<'_, RagState>,
+    request: RagSearchRequest,
+) -> Result<Vec<SearchResult>, String> {
+    rag::search_segments(
+        &state,
+        request.file_path,
+        request.query,
+        request.limit.unwrap_or(10),
+    )
+    .await
+}
+
+#[tauri::command]
+fn rag_stats(state: State<RagState>) -> Result<HashMap<String, usize>, String> {
+    rag::get_stats(&state)
+}
+
+#[tauri::command]
+fn rag_clear(state: State<RagState>, file_path: String) -> Result<(), String> {
+    rag::clear_index(&state, &file_path)
+}
+
+#[tauri::command]
+async fn rag_check_ollama() -> Result<bool, String> {
+    rag::check_ollama().await
+}
+
+#[tauri::command]
+async fn rag_check_ollama_model(model: String) -> Result<bool, String> {
+    rag::check_ollama_model(&model).await
+}
+
+#[tauri::command]
+fn rag_install_ollama() -> Result<String, String> {
+    rag::install_ollama()
+}
+
+#[tauri::command]
+fn rag_start_ollama() -> Result<String, String> {
+    rag::start_ollama()
+}
+
+#[tauri::command]
+async fn rag_pull_ollama_model(model: String) -> Result<String, String> {
+    rag::pull_ollama_model(&model).await
+}
+
+// ============================================================================
 // App Entry Point
 // ============================================================================
 
@@ -490,6 +578,7 @@ pub fn run() {
             stdout_reader: None,
         })))
         .manage(ApiKeyState(Mutex::new(None)))
+        .manage(RagState::new())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -507,6 +596,17 @@ pub fn run() {
             has_api_key,
             // Chat commands
             chat_stream,
+            // RAG commands
+            rag_init,
+            rag_index,
+            rag_search,
+            rag_stats,
+            rag_clear,
+            rag_check_ollama,
+            rag_check_ollama_model,
+            rag_install_ollama,
+            rag_start_ollama,
+            rag_pull_ollama_model,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

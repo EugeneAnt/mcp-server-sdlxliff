@@ -33,8 +33,19 @@ import {
 	showApiKeyInput,
 	getApiKey,
 	setApiKey as storeApiKey,
-	clearApiKey as clearStoredApiKey
+	clearApiKey as clearStoredApiKey,
+	ragEnabled
 } from '$lib/stores/settings';
+import {
+	initializeRag,
+	indexFile,
+	searchSegments,
+	formatRagContext,
+	ragInitialized,
+	ragLastContext,
+	ragLastSearchResults,
+	ragInjectedContext
+} from '$lib/services/ragService';
 
 const systemPrompt = `You are an SDLXLIFF translation assistant. You help users translate and edit SDLXLIFF files.
 
@@ -75,10 +86,28 @@ export async function initializeApp(): Promise<void> {
 			await initializeClient(storedKey);
 			showApiKeyInput.set(false);
 			await tryConnectMcp();
+			// Initialize RAG (non-blocking)
+			initializeRag().catch((e) => console.warn('RAG init failed:', e));
 		} catch (error) {
 			console.error('Failed to initialize from stored key:', error);
 			await clearStoredApiKey();
 			showApiKeyInput.set(true);
+		}
+	}
+}
+
+/**
+ * Index selected files for RAG search (call when files are selected)
+ */
+export async function indexSelectedFiles(): Promise<void> {
+	if (!get(ragEnabled) || !get(ragInitialized)) return;
+
+	const paths = get(selectedPaths);
+	for (const path of paths) {
+		try {
+			await indexFile(path);
+		} catch (error) {
+			console.warn('Failed to index file for RAG:', path, error);
 		}
 	}
 }
@@ -184,10 +213,48 @@ export async function sendMessage(): Promise<void> {
 	shouldAutoScroll.set(true);
 
 	const paths = get(selectedPaths);
-	const contextPrefix =
-		paths.length > 0
-			? `[Working with ${paths.length} file${paths.length > 1 ? 's' : ''}:\n${paths.map((p) => `- ${p}`).join('\n')}]\n\n`
-			: '';
+
+	// Build context with RAG if enabled
+	let contextPrefix = '';
+
+	if (paths.length > 0) {
+		contextPrefix = `[Working with ${paths.length} file${paths.length > 1 ? 's' : ''}:\n${paths.map((p) => `- ${p}`).join('\n')}]\n\n`;
+
+		// Use RAG to find relevant segments if enabled
+		if (get(ragEnabled) && get(ragInitialized)) {
+			try {
+				// Search each file for relevant segments
+				const allResults = [];
+				for (const path of paths) {
+					const results = await searchSegments(path, userMessage, 5);
+					allResults.push(...results);
+				}
+
+				if (allResults.length > 0) {
+					// Sort by score and take top 10
+					allResults.sort((a, b) => b.score - a.score);
+					const topResults = allResults.slice(0, 10);
+
+					// Update stores with actual results being sent to Claude
+					ragLastContext.set(topResults);
+					ragLastSearchResults.set(topResults.length);
+
+					const ragContext = formatRagContext(topResults);
+					ragInjectedContext.set(ragContext);
+					contextPrefix += ragContext + '\n\n';
+					console.log(`RAG: Added ${topResults.length} relevant segments to context`);
+				} else {
+					// Clear context if no results
+					ragLastContext.set([]);
+					ragLastSearchResults.set(0);
+					ragInjectedContext.set('');
+				}
+			} catch (error) {
+				console.warn('RAG search failed, continuing without:', error);
+			}
+		}
+	}
+
 	const messageWithContext = contextPrefix + userMessage;
 
 	displayMessages.addUserMessage(userMessage);
