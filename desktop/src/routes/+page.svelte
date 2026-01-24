@@ -4,7 +4,8 @@
 		initializeClient,
 		streamChatWithTools,
 		type ConversationMessage,
-		type ToolUseBlock
+		type ToolUseBlock,
+		type TokenUsage
 	} from '$lib/claude';
 	import {
 		connectMcpServer,
@@ -38,6 +39,10 @@
 	let showFileSelector = false;
 	let currentFolder: string | null = null;
 	let pendingSelection: Set<string> = new Set();
+
+	// Token usage tracking
+	let sessionUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+	let lastRequestUsage: TokenUsage | null = null;
 
 	async function handleSelectFile() {
 		const path = await selectSdlxliffFile();
@@ -122,10 +127,17 @@ Be helpful and concise. Preserve formatting and tags in translations.`;
 	onMount(async () => {
 		const storedKey = localStorage.getItem('anthropic_api_key');
 		if (storedKey) {
-			apiKey = storedKey;
-			initializeClient(storedKey);
-			showApiKeyInput = false;
-			await tryConnectMcp();
+			try {
+				apiKey = storedKey;
+				initializeClient(storedKey);
+				showApiKeyInput = false;
+				await tryConnectMcp();
+			} catch (error) {
+				console.error('Failed to initialize from stored key:', error);
+				// Clear invalid key and show input
+				localStorage.removeItem('anthropic_api_key');
+				showApiKeyInput = true;
+			}
 		}
 	});
 
@@ -166,10 +178,15 @@ Be helpful and concise. Preserve formatting and tags in translations.`;
 
 	function saveApiKey() {
 		if (apiKey.trim()) {
-			localStorage.setItem('anthropic_api_key', apiKey.trim());
-			initializeClient(apiKey.trim());
-			showApiKeyInput = false;
-			tryConnectMcp();
+			try {
+				localStorage.setItem('anthropic_api_key', apiKey.trim());
+				initializeClient(apiKey.trim());
+				showApiKeyInput = false;
+				tryConnectMcp();
+			} catch (error) {
+				console.error('Failed to initialize client:', error);
+				alert('Failed to initialize: ' + (error instanceof Error ? error.message : 'Unknown error'));
+			}
 		}
 	}
 
@@ -252,6 +269,14 @@ Be helpful and concise. Preserve formatting and tags in translations.`;
 								: m
 						);
 					}
+				} else if (event.type === 'usage' && event.usage) {
+					lastRequestUsage = event.usage;
+					sessionUsage = {
+						inputTokens: sessionUsage.inputTokens + event.usage.inputTokens,
+						outputTokens: sessionUsage.outputTokens + event.usage.outputTokens,
+						cacheReadTokens: (sessionUsage.cacheReadTokens || 0) + (event.usage.cacheReadTokens || 0),
+						cacheWriteTokens: (sessionUsage.cacheWriteTokens || 0) + (event.usage.cacheWriteTokens || 0)
+					};
 				} else if (event.type === 'done') {
 					if (assistantDisplayIndex !== -1) {
 						displayMessages = displayMessages.map((m, i) =>
@@ -389,6 +414,30 @@ Be helpful and concise. Preserve formatting and tags in translations.`;
 					<line x1="6" y1="6" x2="18" y2="18"></line>
 				</svg>
 			</button>
+		</div>
+	{/if}
+
+	<!-- Token Usage Bar -->
+	{#if sessionUsage.inputTokens > 0}
+		<div class="flex items-center justify-between px-4 py-1.5 bg-zinc-800/30 border-b border-zinc-700/50 text-xs font-mono">
+			<div class="flex items-center gap-4 text-zinc-500">
+				<span title="Total tokens this session">
+					Session: <span class="text-zinc-400">{(sessionUsage.inputTokens + sessionUsage.outputTokens).toLocaleString()}</span> tokens
+				</span>
+				{#if sessionUsage.cacheReadTokens}
+					<span title="Tokens read from cache (90% cheaper)" class="text-green-500">
+						Cache hit: {sessionUsage.cacheReadTokens.toLocaleString()}
+					</span>
+				{/if}
+			</div>
+			{#if lastRequestUsage}
+				<div class="flex items-center gap-3 text-zinc-600">
+					<span>Last: ↓{lastRequestUsage.inputTokens.toLocaleString()} ↑{lastRequestUsage.outputTokens.toLocaleString()}</span>
+					{#if lastRequestUsage.cacheReadTokens}
+						<span class="text-green-600">cached: {lastRequestUsage.cacheReadTokens.toLocaleString()}</span>
+					{/if}
+				</div>
+			{/if}
 		</div>
 	{/if}
 
