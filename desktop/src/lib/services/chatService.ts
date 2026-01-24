@@ -16,6 +16,7 @@ import {
 	sessionUsage,
 	lastRequestUsage,
 	shouldAutoScroll,
+	resetChat,
 	type ToolCall
 } from '$lib/stores/chat';
 import {
@@ -141,6 +142,11 @@ export async function clearApiKeyAndLogout(): Promise<void> {
 	showApiKeyInput.set(true);
 	disconnectMcpServer();
 	resetMcp();
+}
+
+export function startNewChat(): void {
+	resetChat();
+	currentModelUsed.set(null);
 }
 
 async function handleToolCall(toolUse: ToolUseBlock): Promise<string> {

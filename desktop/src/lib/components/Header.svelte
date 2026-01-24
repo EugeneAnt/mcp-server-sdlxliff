@@ -3,13 +3,23 @@
 	import { showApiKeyInput } from '$lib/stores/settings';
 	import { mcpConnected, mcpConnecting, mcpError, mcpTools } from '$lib/stores/mcp';
 	import { handleSelectFile, handleSelectFolder } from '$lib/services/fileService';
-	import { tryConnectMcp, clearApiKeyAndLogout } from '$lib/services/chatService';
+	import { tryConnectMcp, clearApiKeyAndLogout, startNewChat } from '$lib/services/chatService';
 </script>
 
 <header class="flex items-center justify-between p-4 bg-zinc-800 border-b border-zinc-700">
 	<h1 class="text-lg font-medium">XLIFF Chat</h1>
 	<div class="flex items-center gap-4">
 		{#if !$showApiKeyInput}
+			<button
+				onclick={startNewChat}
+				title="Start new chat"
+				class="flex items-center gap-1.5 text-sm px-2.5 py-1.5 rounded bg-zinc-700 text-zinc-200 hover:bg-zinc-600 transition-colors"
+			>
+				<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+					<path d="M12 5v14M5 12h14"></path>
+				</svg>
+				<span class="text-xs">New</span>
+			</button>
 			<button
 				onclick={handleSelectFile}
 				title="Select SDLXLIFF file"

@@ -21,12 +21,20 @@
 					Cache hit: {$sessionUsage.cacheReadTokens.toLocaleString()}
 				</span>
 			{/if}
+			{#if $sessionUsage.cacheWriteTokens}
+				<span title="Tokens written to cache (25% more expensive, but enables future cache hits)" class="text-amber-500">
+					Cache write: {$sessionUsage.cacheWriteTokens.toLocaleString()}
+				</span>
+			{/if}
 		</div>
 		{#if $lastRequestUsage}
 			<div class="flex items-center gap-3 text-zinc-600">
 				<span>Last: ↓{$lastRequestUsage.inputTokens.toLocaleString()} ↑{$lastRequestUsage.outputTokens.toLocaleString()}</span>
 				{#if $lastRequestUsage.cacheReadTokens}
 					<span class="text-green-600">cached: {$lastRequestUsage.cacheReadTokens.toLocaleString()}</span>
+				{/if}
+				{#if $lastRequestUsage.cacheWriteTokens}
+					<span class="text-amber-600">written: {$lastRequestUsage.cacheWriteTokens.toLocaleString()}</span>
 				{/if}
 			</div>
 		{/if}
