@@ -146,6 +146,16 @@ async def list_tools() -> list[Tool]:
                             "Default: no filtering (returns all segments)."
                         ),
                     },
+                    "skip_cm": {
+                        "type": "boolean",
+                        "description": (
+                            "Skip Context Matches (CM). CMs are 100% matches where both source, "
+                            "target AND surrounding context match the TM. "
+                            "Use when client says 'skip CMs' or 'don't touch context matches'. "
+                            "Default: false."
+                        ),
+                        "default": False,
+                    },
                 },
                 "required": ["file_path"],
             },
@@ -354,6 +364,16 @@ async def list_tools() -> list[Tool]:
                             "Use when client requests not to touch pre-translated segments."
                         ),
                     },
+                    "skip_cm": {
+                        "type": "boolean",
+                        "description": (
+                            "Skip Context Matches (CM) from QA. CMs are 100% matches where both source, "
+                            "target AND surrounding context match the TM. "
+                            "Use when client says 'skip CMs' or 'don't touch context matches'. "
+                            "Default: false."
+                        ),
+                        "default": False,
+                    },
                 },
                 "required": ["file_path"],
             },
@@ -374,7 +394,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             offset = arguments.get("offset", 0)
             limit = arguments.get("limit")  # None means all
             max_percent = arguments.get("max_percent")  # None means no filtering
-            logger.info(f"read_sdlxliff: file_path={file_path}, include_tags={include_tags}, offset={offset}, limit={limit}, max_percent={max_percent}")
+            skip_cm = arguments.get("skip_cm", False)  # Skip Context Matches
+            logger.info(f"read_sdlxliff: file_path={file_path}, include_tags={include_tags}, offset={offset}, limit={limit}, max_percent={max_percent}, skip_cm={skip_cm}")
             logger.info(f"CWD: {os.getcwd()}")
 
             parser = get_parser(file_path)
@@ -388,6 +409,14 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     if seg.get('percent') is None or seg.get('percent') <= max_percent
                 ]
                 logger.info(f"After max_percent={max_percent} filter: {len(all_segments)} segments (was {total_count})")
+
+            # Apply CM filter if specified (text_match="SourceAndTarget" indicates CM)
+            if skip_cm:
+                all_segments = [
+                    seg for seg in all_segments
+                    if seg.get('text_match') != 'SourceAndTarget'
+                ]
+                logger.info(f"After skip_cm filter: {len(all_segments)} segments")
             logger.info(f"Extracted {total_count} segments")
 
             # Enforce maximum limit to prevent token overflow
@@ -551,6 +580,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             checks = arguments.get("checks")
             glossary_path = arguments.get("glossary_path")
             max_percent = arguments.get("max_percent")
+            skip_cm = arguments.get("skip_cm", False)
 
             parser = get_parser(file_path)
             all_segments = parser.extract_segments()
@@ -563,6 +593,14 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     if seg.get('percent') is None or seg.get('percent') <= max_percent
                 ]
                 logger.info(f"QA: After max_percent={max_percent} filter: {len(all_segments)} segments (was {total_count})")
+
+            # Apply CM filter if specified
+            if skip_cm:
+                all_segments = [
+                    seg for seg in all_segments
+                    if seg.get('text_match') != 'SourceAndTarget'
+                ]
+                logger.info(f"QA: After skip_cm filter: {len(all_segments)} segments")
 
             # Filter segments if specific IDs provided
             if segment_ids:
@@ -613,9 +651,12 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             }
 
             # Add filter info if applied
-            if max_percent is not None:
-                response["filtered_by_max_percent"] = max_percent
+            if max_percent is not None or skip_cm:
                 response["segments_excluded"] = total_count - len(all_segments)
+                if max_percent is not None:
+                    response["filtered_by_max_percent"] = max_percent
+                if skip_cm:
+                    response["skipped_context_matches"] = True
 
             # Add glossary info to response
             if used_glossary_path:

@@ -256,11 +256,14 @@ class SDLXLIFFParser:
                 # Parse percent as integer if present
                 percent_str = seg.get('percent')
                 percent = int(percent_str) if percent_str else None
+                # text-match="SourceAndTarget" indicates Context Match (CM)
+                text_match = seg.get('text-match')
                 seg_map[seg_id] = {
                     'conf': seg.get('conf'),
                     'locked': seg.get('locked') == 'true',
                     'percent': percent,
                     'origin': seg.get('origin'),
+                    'text_match': text_match,
                 }
 
         # Extract each mrk segment from target
@@ -312,6 +315,11 @@ class SDLXLIFFParser:
                     origin = seg_info.get('origin')
                     if origin:
                         segment_data['origin'] = origin
+
+                    # Add text_match for Context Match detection (CM = "SourceAndTarget")
+                    text_match = seg_info.get('text_match')
+                    if text_match:
+                        segment_data['text_match'] = text_match
 
                     # Add repetitions count only when > 1 (to minimize token overhead)
                     rep_count = self._repetition_counts.get((tu_id, mid))
@@ -659,10 +667,11 @@ class SDLXLIFFParser:
         status = sdl_seg.get('conf') if sdl_seg is not None else None
         locked = sdl_seg.get('locked') == 'true' if sdl_seg is not None else False
 
-        # Get percent and origin
+        # Get percent, origin, and text_match
         percent_str = sdl_seg.get('percent') if sdl_seg is not None else None
         percent = int(percent_str) if percent_str else None
         origin = sdl_seg.get('origin') if sdl_seg is not None else None
+        text_match = sdl_seg.get('text-match') if sdl_seg is not None else None
 
         segment_data = {
             'segment_id': segment_id,
@@ -683,6 +692,10 @@ class SDLXLIFFParser:
         # Add origin only when present (to minimize token overhead)
         if origin:
             segment_data['origin'] = origin
+
+        # Add text_match for Context Match detection (CM = "SourceAndTarget")
+        if text_match:
+            segment_data['text_match'] = text_match
 
         # Add repetitions count only when > 1 (to minimize token overhead)
         rep_count = self._repetition_counts.get((tu_id, segment_id))
