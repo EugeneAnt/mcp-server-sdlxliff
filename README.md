@@ -39,7 +39,7 @@ A standalone macOS app with a native file picker - no command line required.
 
    > **Note:** The desktop app looks for Python at `/opt/homebrew/bin/python3` (Apple Silicon) or `/usr/local/bin/python3` (Intel Mac). Make sure to install with the same `pip3` that corresponds to your Homebrew Python.
 
-2. Download `XLIFF.Chat-1.0.0.dmg` from [Releases](https://github.com/EugeneAnt/mcp-server-sdlxliff/releases)
+2. Download `XLIFF Chat_1.1.0_aarch64.dmg` from [Releases](https://github.com/EugeneAnt/mcp-server-sdlxliff/releases)
 
 3. Open the `.dmg` and drag XLIFF Chat to your Applications folder
 
@@ -65,7 +65,7 @@ Use with your Claude Pro or Team subscription through Claude Cowork.
 
 **Option A: Desktop Extension (Recommended)**
 
-1. Download `mcp-server-sdlxliff-1.0.0.mcpb` from [Releases](https://github.com/EugeneAnt/mcp-server-sdlxliff/releases)
+1. Download `mcp-server-sdlxliff-1.1.0.mcpb` from [Releases](https://github.com/EugeneAnt/mcp-server-sdlxliff/releases)
 2. Open Claude Desktop → Settings → Extensions
 3. Click "Install Extension" and select the downloaded `.mcpb` file
 4. The extension installs automatically (Python and dependencies are managed for you)

@@ -1,5 +1,11 @@
+import { writable } from 'svelte/store';
 import { load, type Store } from '@tauri-apps/plugin-store';
 
+// UI state for API key input
+export const apiKey = writable('');
+export const showApiKeyInput = writable(true);
+
+// Store instance (lazy loaded)
 let store: Store | null = null;
 
 async function getStore(): Promise<Store> {
