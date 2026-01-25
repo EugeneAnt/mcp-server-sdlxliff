@@ -130,10 +130,11 @@ export async function indexFile(filePath: string): Promise<number> {
 			throw new Error('MCP not connected');
 		}
 
-		// Get segments via MCP
+		// Get segments via MCP (for_indexing bypasses 50-segment limit)
 		const result = await client.callTool('read_sdlxliff', {
 			file_path: filePath,
-			limit: 500 // Get more for indexing
+			limit: 10000, // High limit for indexing
+			for_indexing: true // Bypass limit cap - segments go to RAG, not Claude context
 		});
 
 		const content = result.content[0];

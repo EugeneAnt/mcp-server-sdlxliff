@@ -37,6 +37,13 @@ import {
 	ragEnabled
 } from '$lib/stores/settings';
 import {
+	addIssue,
+	addIssues,
+	clearIssues,
+	getIssueCounts,
+	type Issue
+} from '$lib/stores/issues';
+import {
 	initializeRag,
 	indexFile,
 	searchSegments,
@@ -51,22 +58,47 @@ import {
 
 const systemPrompt = `You are an SDLXLIFF translation assistant. You help users translate and edit SDLXLIFF files.
 
-You have access to MCP tools that allow you to:
-- read_sdlxliff: Read and extract segments from SDLXLIFF files
+## Available Tools
+
+- read_sdlxliff: Read segments (paginated, max 50 per request)
 - get_sdlxliff_segment: Get a specific segment by ID
 - update_sdlxliff_segment: Update a translation
 - save_sdlxliff: Save changes to the file
-- get_sdlxliff_statistics: Get file statistics
+- get_sdlxliff_statistics: Get file statistics and language info
 - validate_sdlxliff_segment: Validate a translation before updating
-- qa_check_sdlxliff: Run QA checks on translations
-- rag_search: Semantic search to find segments by meaning (use for "find segments about X", "show translations related to Y")
+- qa_check_sdlxliff: Run regex-based QA checks (issues auto-tracked)
+- rag_search: Semantic search to find segments by meaning
+- add_issue_to_report: Log actionable issues to session tracker
 
-When working with SDLXLIFF files:
-1. First use get_sdlxliff_statistics to understand the file
-2. Use read_sdlxliff to get segments (paginated, max 50 per request)
-3. Use rag_search when user asks to FIND or SEARCH for specific content by meaning
-4. Use update_sdlxliff_segment to update translations
-5. Use save_sdlxliff to persist changes
+## Tool Usage Strategy
+
+**For TARGETED queries** (find specific content):
+→ Use rag_search("term or concept")
+→ Returns only relevant segments, minimal context cost
+→ Example: "find segments about privacy" → rag_search("privacy policy")
+
+**For COMPREHENSIVE review** (check all segments):
+→ First ask: "Smart sampling (faster) or full review (thorough)?"
+→ Smart sampling: Use rag_search for high-risk segments:
+  - rag_search("technical terminology")
+  - rag_search("long complex sentences")
+  - rag_search("error messages")
+→ Full review: Use read_sdlxliff in batches (offset pagination)
+
+**For QA checks** (punctuation, numbers, consistency):
+→ Use qa_check_sdlxliff - runs server-side, no context cost
+→ Issues automatically appear in the Issues Panel
+
+**When you find problems**:
+→ Use add_issue_to_report for actionable issues that need fixing
+→ Skip minor stylistic observations unless they're patterns
+
+## Workflow
+
+1. Use get_sdlxliff_statistics first to understand the file
+2. Choose tool based on task type (see strategy above)
+3. Use update_sdlxliff_segment to fix translations
+4. Use save_sdlxliff to persist changes
 
 Be helpful and concise. Preserve formatting and tags in translations.`;
 
@@ -88,6 +120,49 @@ const ragToolDefinition = {
 			}
 		},
 		required: ['query']
+	}
+};
+
+// Issue tracking tool (handled by frontend, not MCP)
+const addIssueToolDefinition = {
+	name: 'add_issue_to_report',
+	description:
+		'Log a translation issue to the session tracker. Use when you find actionable problems during review. Issues are tracked in the Issues Panel and can be exported.',
+	input_schema: {
+		type: 'object' as const,
+		properties: {
+			segment_id: {
+				type: 'string',
+				description: 'The segment ID with the issue'
+			},
+			issue_type: {
+				type: 'string',
+				enum: ['semantic', 'grammar', 'terminology', 'style', 'punctuation', 'numbers', 'formatting', 'inconsistency', 'other'],
+				description: 'Category of the issue'
+			},
+			severity: {
+				type: 'string',
+				enum: ['error', 'warning', 'info'],
+				description: 'Issue severity (default: warning)'
+			},
+			message: {
+				type: 'string',
+				description: 'Description of the issue'
+			},
+			suggested_fix: {
+				type: 'string',
+				description: 'Optional suggested correction'
+			},
+			source: {
+				type: 'string',
+				description: 'Source text excerpt (optional)'
+			},
+			target: {
+				type: 'string',
+				description: 'Target text excerpt (optional)'
+			}
+		},
+		required: ['segment_id', 'issue_type', 'message']
 	}
 };
 
@@ -207,6 +282,8 @@ export function startNewChat(): void {
 	ragLastContext.set([]);
 	ragLastSearchResults.set(0);
 	ragInjectedContext.set('');
+	// Clear issues for new session
+	clearIssues();
 }
 
 async function handleToolCall(toolUse: ToolUseBlock): Promise<string> {
@@ -227,6 +304,17 @@ async function handleToolCall(toolUse: ToolUseBlock): Promise<string> {
 	// Handle RAG tool locally (not via MCP)
 	if (toolUse.name === 'rag_search') {
 		resultText = await handleRagSearch(toolUse.input as { query: string; limit?: number });
+	} else if (toolUse.name === 'add_issue_to_report') {
+		// Handle issue tracking locally
+		resultText = handleAddIssue(toolUse.input as {
+			segment_id: string;
+			issue_type: string;
+			severity?: 'error' | 'warning' | 'info';
+			message: string;
+			suggested_fix?: string;
+			source?: string;
+			target?: string;
+		});
 	} else {
 		// Handle MCP tools
 		const client = getMcpClient();
@@ -235,6 +323,11 @@ async function handleToolCall(toolUse: ToolUseBlock): Promise<string> {
 		}
 		const result = await client.callTool(toolUse.name, toolUse.input);
 		resultText = result.content.map((c) => c.text || JSON.stringify(c)).join('\n');
+
+		// Auto-populate issues from QA tool
+		if (toolUse.name === 'qa_check_sdlxliff') {
+			autoPopulateIssuesFromQA(resultText);
+		}
 	}
 
 	toolCalls.updateToolResponse(toolCallId, resultText);
@@ -300,6 +393,70 @@ async function handleRagSearch(input: { query: string; limit?: number }): Promis
 	}
 }
 
+/**
+ * Handle add_issue_to_report tool call (local, not MCP)
+ */
+function handleAddIssue(input: {
+	segment_id: string;
+	issue_type: string;
+	severity?: 'error' | 'warning' | 'info';
+	message: string;
+	suggested_fix?: string;
+	source?: string;
+	target?: string;
+}): string {
+	addIssue({
+		segment_id: input.segment_id,
+		issue_type: input.issue_type,
+		severity: input.severity || 'warning',
+		message: input.message,
+		suggested_fix: input.suggested_fix,
+		source: input.source || '',
+		target: input.target || '',
+		source_tool: 'manual_review'
+	});
+
+	const counts = getIssueCounts();
+	return JSON.stringify({ ok: true, total: counts.total });
+}
+
+/**
+ * Auto-populate issues from QA tool response
+ */
+function autoPopulateIssuesFromQA(resultText: string): void {
+	try {
+		const qaResult = JSON.parse(resultText);
+		if (!qaResult.issues || !Array.isArray(qaResult.issues)) return;
+
+		const issues: Omit<Issue, 'id' | 'timestamp' | 'resolved'>[] = qaResult.issues.map(
+			(issue: {
+				segment_id: string;
+				check: string;
+				severity: string;
+				message: string;
+				source_excerpt?: string;
+				target_excerpt?: string;
+			}) => ({
+				segment_id: issue.segment_id,
+				issue_type: `qa_${issue.check}`,
+				severity: (issue.severity || 'warning') as 'error' | 'warning' | 'info',
+				message: issue.message,
+				source: issue.source_excerpt || '',
+				target: issue.target_excerpt || '',
+				source_tool: 'qa_check' as const
+			})
+		);
+
+		if (issues.length > 0) {
+			addIssues(issues);
+			console.log(`Auto-populated ${issues.length} issues from QA check`);
+		}
+	} catch (e) {
+		// Ignore parse errors - not all tool results are JSON
+		console.warn('Failed to parse QA result for issue tracking:', e);
+	}
+}
+
 export async function sendMessage(): Promise<void> {
 	const input = get(inputValue).trim();
 	if (!input || get(isLoading)) return;
@@ -340,6 +497,11 @@ export async function sendMessage(): Promise<void> {
 		// Add RAG tool if enabled
 		if (get(ragEnabled) && get(ragInitialized)) {
 			tools.push(ragToolDefinition);
+		}
+
+		// Add issue tracking tool (always available when MCP connected)
+		if (connected) {
+			tools.push(addIssueToolDefinition);
 		}
 
 		const model = get(selectedModel);

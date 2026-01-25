@@ -158,6 +158,15 @@ async def list_tools() -> list[Tool]:
                         ),
                         "default": False,
                     },
+                    "for_indexing": {
+                        "type": "boolean",
+                        "description": (
+                            "Internal use only. When true, bypasses the 50-segment limit. "
+                            "Used by frontend for RAG indexing (segments go to vector store, not Claude context). "
+                            "Default: false."
+                        ),
+                        "default": False,
+                    },
                 },
                 "required": ["file_path"],
             },
@@ -399,7 +408,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             limit = arguments.get("limit")  # None means all
             max_percent = arguments.get("max_percent")  # None means no filtering
             skip_cm = arguments.get("skip_cm", False)  # Skip Context Matches
-            logger.info(f"read_sdlxliff: file_path={file_path}, include_tags={include_tags}, offset={offset}, limit={limit}, max_percent={max_percent}, skip_cm={skip_cm}")
+            for_indexing = arguments.get("for_indexing", False)  # Bypass limit for RAG indexing
+            logger.info(f"read_sdlxliff: file_path={file_path}, include_tags={include_tags}, offset={offset}, limit={limit}, max_percent={max_percent}, skip_cm={skip_cm}, for_indexing={for_indexing}")
             logger.info(f"CWD: {os.getcwd()}")
 
             parser = get_parser(file_path)
@@ -424,10 +434,17 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             logger.info(f"Extracted {total_count} segments")
 
             # Enforce maximum limit to prevent token overflow
+            # Skip limit cap when for_indexing=True (RAG indexing goes to vector store, not Claude context)
             MAX_SEGMENTS_PER_REQUEST = 50
-            if limit is None or limit > MAX_SEGMENTS_PER_REQUEST:
-                limit = MAX_SEGMENTS_PER_REQUEST
-                logger.info(f"Limit capped to {MAX_SEGMENTS_PER_REQUEST} segments")
+            if not for_indexing:
+                if limit is None or limit > MAX_SEGMENTS_PER_REQUEST:
+                    limit = MAX_SEGMENTS_PER_REQUEST
+                    logger.info(f"Limit capped to {MAX_SEGMENTS_PER_REQUEST} segments")
+            else:
+                # For indexing: use requested limit or all segments
+                if limit is None:
+                    limit = len(all_segments)
+                logger.info(f"For indexing: returning up to {limit} segments (no cap)")
 
             # Apply pagination
             segments = all_segments[offset:offset + limit]
