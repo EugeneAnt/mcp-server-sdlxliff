@@ -9,13 +9,26 @@ Provides stateless QA check functions that detect common translation issues:
 - Bracket/parenthesis mismatches
 - Inconsistent repetitions
 - Terminology/glossary compliance
+- Spelling (opt-in, requires explicit check selection)
 """
 
+import json
 import re
+import urllib.request
+import urllib.parse
+import urllib.error
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+try:
+    from spellchecker import SpellChecker
+    SPELLCHECKER_AVAILABLE = True
+except ImportError:
+    SPELLCHECKER_AVAILABLE = False
+
+from .languages import get_spellcheck_config, BACKEND_YANDEX, BACKEND_PYSPELLCHECKER
 
 
 @dataclass
@@ -481,27 +494,289 @@ def check_terminology(
     return issues
 
 
+# Module-level cache for spellcheckers (one per language)
+_spellcheckers: Dict[str, Any] = {}
+
+
+def get_spellchecker(lang_code: str) -> Any:
+    """
+    Get or create a cached SpellChecker for the given language.
+
+    Args:
+        lang_code: pyspellchecker language code (e.g., 'de', 'en')
+
+    Returns:
+        SpellChecker instance for the language
+    """
+    if not SPELLCHECKER_AVAILABLE:
+        return None
+
+    if lang_code not in _spellcheckers:
+        _spellcheckers[lang_code] = SpellChecker(language=lang_code)
+    return _spellcheckers[lang_code]
+
+
+def load_custom_dictionary(dict_path: str) -> Set[str]:
+    """
+    Load custom words from file (one word per line, # for comments).
+
+    Args:
+        dict_path: Path to the dictionary file
+
+    Returns:
+        Set of lowercase custom words
+    """
+    words: Set[str] = set()
+    path = Path(dict_path)
+
+    if not path.exists():
+        return words
+
+    try:
+        for line in path.read_text(encoding='utf-8').splitlines():
+            line = line.strip()
+            if line and not line.startswith('#'):
+                words.add(line.lower())
+    except (IOError, UnicodeDecodeError):
+        pass
+
+    return words
+
+
+def discover_custom_dictionary(sdlxliff_path: str) -> Optional[str]:
+    """
+    Auto-discover custom dictionary file near the SDLXLIFF file.
+
+    Looks for common dictionary filenames in the same directory:
+    - dictionary.txt
+    - custom_words.txt
+    - spelling.txt
+
+    Args:
+        sdlxliff_path: Path to the SDLXLIFF file
+
+    Returns:
+        Path to dictionary file if found, None otherwise
+    """
+    sdlxliff_dir = Path(sdlxliff_path).parent
+
+    candidates = [
+        'dictionary.txt',
+        'custom_words.txt',
+        'spelling.txt',
+    ]
+
+    for candidate in candidates:
+        dict_path = sdlxliff_dir / candidate
+        if dict_path.exists():
+            return str(dict_path)
+
+    return None
+
+
+def _check_spelling_yandex(
+    segment_id: str,
+    target: str,
+    lang_code: str,
+    custom_words: Optional[Set[str]] = None,
+) -> List[QAIssue]:
+    """
+    Check spelling using Yandex Speller API.
+
+    Yandex Speller has proper morphological dictionaries for Russian, Ukrainian,
+    and English, providing much better accuracy than frequency-based spellcheckers.
+
+    Args:
+        segment_id: The segment ID
+        target: Target text to check
+        lang_code: Yandex language code ('ru', 'uk', 'en')
+        custom_words: Optional set of custom words to ignore (lowercase)
+
+    Returns:
+        List of QAIssue for any misspelled words
+    """
+    issues: List[QAIssue] = []
+
+    if not target:
+        return issues
+
+    # Yandex Speller API endpoint
+    url = "https://speller.yandex.net/services/spellservice.json/checkText"
+
+    # Yandex Speller options (additive bitmask):
+    # IGNORE_DIGITS = 2 (skip words with numbers like "авп17х4534")
+    # IGNORE_URLS = 4 (skip URLs, emails, filenames)
+    # FIND_REPEAT_WORDS = 8 (flag repeated words)
+    # IGNORE_CAPITALIZATION = 512 (ignore case errors)
+    options = 2 + 4  # IGNORE_DIGITS + IGNORE_URLS
+
+    # Prepare request
+    params = urllib.parse.urlencode({
+        'text': target,
+        'lang': lang_code,
+        'options': options,
+    })
+
+    try:
+        # Make API request (timeout 5 seconds)
+        req = urllib.request.Request(f"{url}?{params}")
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode('utf-8'))
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError):
+        # If API fails, return empty (don't block QA)
+        return issues
+
+    # Process response - array of error objects
+    # Each error: {"code": 1, "pos": 0, "len": 14, "word": "синхрафазатрон", "s": ["синхрофазотрон"]}
+    for error in data:
+        word = error.get('word', '')
+        suggestions = error.get('s', [])[:3]
+
+        # Filter out custom dictionary words
+        if custom_words and word.lower() in custom_words:
+            continue
+
+        suggestion_text = f" (suggestions: {', '.join(suggestions)})" if suggestions else ""
+        issues.append(QAIssue(
+            segment_id=segment_id,
+            check="spelling",
+            severity="warning",
+            message=f"Possible misspelling: '{word}'{suggestion_text}",
+            source_excerpt="",
+            target_excerpt=_excerpt(target),
+        ))
+
+    return issues
+
+
+def _check_spelling_pyspellchecker(
+    segment_id: str,
+    target: str,
+    lang_code: str,
+    custom_words: Optional[Set[str]] = None,
+) -> List[QAIssue]:
+    """
+    Check spelling using pyspellchecker library.
+
+    Works adequately for languages with simpler morphology (German, Spanish, etc.)
+    but has limitations with highly inflected languages.
+
+    Args:
+        segment_id: The segment ID
+        target: Target text to check
+        lang_code: pyspellchecker language code ('de', 'es', 'fr', etc.)
+        custom_words: Optional set of custom words to ignore (lowercase)
+
+    Returns:
+        List of QAIssue for any misspelled words
+    """
+    issues: List[QAIssue] = []
+
+    if not target:
+        return issues
+
+    if not SPELLCHECKER_AVAILABLE:
+        return issues
+
+    spell = get_spellchecker(lang_code)
+    if not spell:
+        return issues
+
+    # Extract words (Unicode-aware, skip single chars and pure numbers)
+    words = re.findall(r'\b\w+\b', target, re.UNICODE)
+    words = [w for w in words if len(w) > 1 and not w.isdigit()]
+
+    # Find misspelled words
+    misspelled = spell.unknown(words)
+
+    # Filter out custom dictionary words
+    if custom_words:
+        misspelled = {w for w in misspelled if w.lower() not in custom_words}
+
+    for word in misspelled:
+        suggestions = list(spell.candidates(word) or [])[:3]
+        suggestion_text = f" (suggestions: {', '.join(suggestions)})" if suggestions else ""
+        issues.append(QAIssue(
+            segment_id=segment_id,
+            check="spelling",
+            severity="warning",
+            message=f"Possible misspelling: '{word}'{suggestion_text}",
+            source_excerpt="",
+            target_excerpt=_excerpt(target),
+        ))
+
+    return issues
+
+
+def check_spelling(
+    segment_id: str,
+    target: str,
+    target_lang: str,
+    custom_words: Optional[Set[str]] = None,
+) -> List[QAIssue]:
+    """
+    Check spelling in target text.
+
+    Routes to appropriate spellcheck backend based on language:
+    - Yandex Speller: Russian, Ukrainian, English (proper morphology)
+    - pyspellchecker: German, Spanish, French, Italian, Portuguese, Dutch
+
+    Args:
+        segment_id: The segment ID
+        target: Target text to check
+        target_lang: BCP-47 language code (e.g., 'de-DE', 'ru-RU')
+        custom_words: Optional set of custom words to ignore (lowercase)
+
+    Returns:
+        List of QAIssue for any misspelled words
+    """
+    if not target or not target_lang:
+        return []
+
+    config = get_spellcheck_config(target_lang)
+    if not config:
+        return []  # Language not supported
+
+    backend, lang_code = config
+
+    if backend == BACKEND_YANDEX:
+        return _check_spelling_yandex(segment_id, target, lang_code, custom_words)
+    elif backend == BACKEND_PYSPELLCHECKER:
+        return _check_spelling_pyspellchecker(segment_id, target, lang_code, custom_words)
+    else:
+        return []
+
+
 def run_qa_checks(
     segments: List[Dict[str, Any]],
     checks: Optional[List[str]] = None,
-    glossary_terms: Optional[List[Tuple[str, str]]] = None
+    glossary_terms: Optional[List[Tuple[str, str]]] = None,
+    target_lang: Optional[str] = None,
+    custom_words: Optional[Set[str]] = None,
 ) -> QAReport:
     """
     Run all QA checks on a list of segments.
 
     Args:
         segments: List of segment dictionaries from SDLXLIFFParser.extract_segments()
-        checks: Optional list of check names to run. If None, runs all checks.
+        checks: Optional list of check names to run. If None, runs default checks
+                (spelling is OPT-IN and must be explicitly requested).
                 Valid names: trailing_punctuation, numbers, double_spaces,
-                            whitespace, brackets, inconsistent_repetitions, terminology
+                            whitespace, brackets, inconsistent_repetitions,
+                            terminology, spelling
         glossary_terms: Optional list of (source_term, target_term) tuples for
                        terminology checking. If provided and 'terminology' check
                        is enabled, verifies terms are preserved.
+        target_lang: Optional target language code (e.g., 'de-DE') for spelling check.
+                    Only needed if 'spelling' check is enabled.
+        custom_words: Optional set of custom words to ignore during spelling check.
+                     Words should be lowercase.
 
     Returns:
         QAReport with all issues found
     """
-    all_checks = {
+    # Default checks (spelling is OPT-IN, not included here)
+    default_checks = {
         'trailing_punctuation',
         'numbers',
         'double_spaces',
@@ -511,10 +786,13 @@ def run_qa_checks(
         'terminology',
     }
 
+    # All available checks (includes opt-in checks)
+    all_checks = default_checks | {'spelling'}
+
     if checks is None:
-        enabled_checks = all_checks
+        enabled_checks = default_checks  # Use defaults (no spelling)
     else:
-        enabled_checks = set(checks) & all_checks
+        enabled_checks = set(checks) & all_checks  # Use specified checks
 
     issues: List[QAIssue] = []
     segments_with_issues: Set[str] = set()
@@ -555,6 +833,10 @@ def run_qa_checks(
         if 'terminology' in enabled_checks and glossary_terms:
             term_issues = check_terminology(segment_id, source, target, glossary_terms)
             segment_issues.extend(term_issues)
+
+        if 'spelling' in enabled_checks and target_lang:
+            spelling_issues = check_spelling(segment_id, target, target_lang, custom_words)
+            segment_issues.extend(spelling_issues)
 
         if segment_issues:
             segments_with_issues.add(segment_id)

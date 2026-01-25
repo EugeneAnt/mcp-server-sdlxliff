@@ -24,7 +24,15 @@ from .cache import (
     clear_parser_cache,
     validate_file_extension,
 )
-from .qa import run_qa_checks, QAReport, load_glossary, discover_glossary
+from .qa import (
+    run_qa_checks,
+    QAReport,
+    load_glossary,
+    discover_glossary,
+    load_custom_dictionary,
+    discover_custom_dictionary,
+)
+from .languages import is_language_supported
 
 
 # Set up logging - try multiple locations for sandbox compatibility
@@ -313,16 +321,20 @@ async def list_tools() -> list[Tool]:
             description=(
                 "Run quality assurance checks on an SDLXLIFF file. "
                 "ALWAYS use this tool (not custom scripts) for QA tasks. "
-                "Checks include: trailing punctuation mismatches, missing/extra numbers, "
+                "Default checks: trailing punctuation mismatches, missing/extra numbers, "
                 "double spaces, whitespace mismatches, bracket mismatches, "
                 "inconsistent repetitions (same source text translated differently), "
                 "and terminology (glossary compliance). "
+                "OPT-IN checks: spelling (must be explicitly requested via checks parameter). "
+                "Spelling uses target language from file metadata; supports: en, de, es, fr, it, pt, ru, nl, lv, eu, fa, ar. "
                 "For terminology check: auto-discovers glossary.tsv/txt in same folder as SDLXLIFF, "
                 "or specify explicit glossary_path. "
+                "For spelling check: auto-discovers dictionary.txt/custom_words.txt/spelling.txt in same folder, "
+                "or specify explicit dictionary_path. "
                 "Filtering: use max_percent to skip high TM matches (e.g., max_percent=99 excludes 100% matches), "
                 "use skip_cm=true to exclude Context Matches. "
                 "Use for: 'check translation quality', 'find errors', 'are translations consistent', "
-                "'run QA', 'verify before delivery', 'check terminology', 'verify glossary'."
+                "'run QA', 'verify before delivery', 'check terminology', 'verify glossary', 'check spelling'."
             ),
             inputSchema={
                 "type": "object",
@@ -351,13 +363,15 @@ async def list_tools() -> list[Tool]:
                                 "brackets",
                                 "inconsistent_repetitions",
                                 "terminology",
+                                "spelling",
                             ],
                         },
                         "description": (
                             "Optional list of specific checks to run. "
-                            "If not provided, runs all checks. "
+                            "If not provided, runs default checks (all except spelling). "
+                            "Spelling is OPT-IN: must be explicitly listed to run. "
                             "Available: trailing_punctuation, numbers, double_spaces, "
-                            "whitespace, brackets, inconsistent_repetitions, terminology."
+                            "whitespace, brackets, inconsistent_repetitions, terminology, spelling."
                         ),
                     },
                     "glossary_path": {
@@ -365,6 +379,15 @@ async def list_tools() -> list[Tool]:
                         "description": (
                             "Optional path to glossary file (tab-delimited: source_term<TAB>target_term). "
                             "If not provided, auto-discovers glossary.tsv/glossary.txt/terminology.tsv/terminology.txt "
+                            "in same directory as SDLXLIFF file."
+                        ),
+                    },
+                    "dictionary_path": {
+                        "type": "string",
+                        "description": (
+                            "Optional path to custom dictionary file (one word per line, # for comments). "
+                            "Used by spelling check to ignore domain-specific terms. "
+                            "If not provided, auto-discovers dictionary.txt/custom_words.txt/spelling.txt "
                             "in same directory as SDLXLIFF file."
                         ),
                     },
@@ -600,12 +623,18 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             segment_ids = arguments.get("segment_ids")
             checks = arguments.get("checks")
             glossary_path = arguments.get("glossary_path")
+            dictionary_path = arguments.get("dictionary_path")
             max_percent = arguments.get("max_percent")
             skip_cm = arguments.get("skip_cm", False)
 
             parser = get_parser(file_path)
             all_segments = parser.extract_segments()
             total_count = len(all_segments)
+
+            # Get target language from file metadata (for spelling check)
+            metadata = parser.get_file_metadata()
+            target_lang = metadata.get('target_language')
+            logger.info(f"QA: Target language from metadata: {target_lang}")
 
             # Apply percent filter if specified
             if max_percent is not None:
@@ -649,8 +678,32 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     if glossary_terms:
                         used_glossary_path = discovered
 
-            # Run QA checks with glossary terms
-            report = run_qa_checks(segments_to_check, checks, glossary_terms)
+            # Load custom dictionary for spelling check (only if spelling requested)
+            custom_words = None
+            used_dictionary_path = None
+            spelling_requested = checks and 'spelling' in checks
+
+            if spelling_requested:
+                if dictionary_path:
+                    custom_words = load_custom_dictionary(dictionary_path)
+                    if custom_words:
+                        used_dictionary_path = dictionary_path
+                else:
+                    discovered_dict = discover_custom_dictionary(file_path)
+                    if discovered_dict:
+                        custom_words = load_custom_dictionary(discovered_dict)
+                        if custom_words:
+                            used_dictionary_path = discovered_dict
+                logger.info(f"QA: Spelling check requested, custom dictionary: {used_dictionary_path}, words: {len(custom_words) if custom_words else 0}")
+
+            # Run QA checks with glossary terms and spelling support
+            report = run_qa_checks(
+                segments_to_check,
+                checks,
+                glossary_terms,
+                target_lang=target_lang,
+                custom_words=custom_words,
+            )
 
             # Convert to JSON-serializable format
             response = {
@@ -683,6 +736,16 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             if used_glossary_path:
                 response["glossary_used"] = used_glossary_path
                 response["glossary_terms_count"] = len(glossary_terms) if glossary_terms else 0
+
+            # Add spelling info to response
+            if spelling_requested:
+                if target_lang:
+                    response["target_language"] = target_lang
+                if not is_language_supported(target_lang):
+                    response["spelling_skipped"] = f"Language '{target_lang}' not supported for spelling check"
+                if used_dictionary_path:
+                    response["dictionary_used"] = used_dictionary_path
+                    response["custom_words_count"] = len(custom_words) if custom_words else 0
 
             return [
                 TextContent(

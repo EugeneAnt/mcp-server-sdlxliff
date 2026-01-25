@@ -223,19 +223,29 @@ Run quality assurance checks on the translation file.
 **Parameters:**
 - `file_path` (string, required): Path to the SDLXLIFF file
 - `segment_ids` (array of strings, optional): Specific segment IDs to check. If omitted, checks all segments.
-- `checks` (array of strings, optional): Specific checks to run. If omitted, runs all checks.
+- `checks` (array of strings, optional): Specific checks to run. If omitted, runs default checks (all except `spelling`).
 - `glossary_path` (string, optional): Path to glossary file for terminology check. If omitted, auto-discovers `glossary.tsv`, `glossary.txt`, `terminology.tsv`, or `terminology.txt` in the same directory as the SDLXLIFF file.
+- `dictionary_path` (string, optional): Path to custom dictionary for spelling check. If omitted, auto-discovers `dictionary.txt`, `custom_words.txt`, or `spelling.txt` in the same directory as the SDLXLIFF file.
 
 **Available checks:**
-| Check | Description |
-|-------|-------------|
-| `trailing_punctuation` | Source ends with `.!?:;` but target doesn't (or vice versa) |
-| `numbers` | Numbers in source don't match numbers in target |
-| `double_spaces` | Target contains consecutive spaces |
-| `whitespace` | Leading/trailing whitespace mismatch between source and target |
-| `brackets` | Different count of `()[]{}` between source and target |
-| `inconsistent_repetitions` | Segments with same source text have different translations |
-| `terminology` | Glossary terms from source must appear in target (requires glossary file) |
+| Check | Description | Default |
+|-------|-------------|---------|
+| `trailing_punctuation` | Source ends with `.!?:;` but target doesn't (or vice versa) | Yes |
+| `numbers` | Numbers in source don't match numbers in target | Yes |
+| `double_spaces` | Target contains consecutive spaces | Yes |
+| `whitespace` | Leading/trailing whitespace mismatch between source and target | Yes |
+| `brackets` | Different count of `()[]{}` between source and target | Yes |
+| `inconsistent_repetitions` | Segments with same source text have different translations | Yes |
+| `terminology` | Glossary terms from source must appear in target (requires glossary file) | Yes |
+| `spelling` | Spellcheck target text using target language from file metadata | **No** (opt-in) |
+
+**Spelling check:**
+- Must be explicitly requested: `checks: ["spelling"]` or `checks: ["spelling", "numbers", ...]`
+- Uses target language from SDLXLIFF metadata (e.g., `de-DE`, `ru-RU`)
+- Supported languages:
+  - **Russian, Ukrainian, English**: [Yandex.Speller](http://api.yandex.ru/speller/) (proper morphological dictionary)
+  - **German, Spanish, French, Italian, Portuguese, Dutch**: pyspellchecker
+- Unsupported languages are silently skipped (no false positives for rare languages)
 
 **Glossary file format:**
 ```
@@ -248,6 +258,16 @@ Smart Switch	Smart Switch
 
 Single terms (without tab) mean the term must appear unchanged in the target.
 
+**Custom dictionary file format (for spelling):**
+```
+# Comment lines start with #
+# One word per line (case-insensitive)
+SDLXLIFF
+Trados
+MCP
+ProductName
+```
+
 **Returns:** JSON object with:
 ```json
 {
@@ -256,24 +276,31 @@ Single terms (without tab) mean the term must appear unchanged in the target.
   "segments_with_issues": 12,
   "glossary_used": "/path/to/glossary.tsv",
   "glossary_terms_count": 5,
+  "target_language": "de-DE",
+  "dictionary_used": "/path/to/dictionary.txt",
+  "custom_words_count": 10,
   "issues": [
     {
       "segment_id": "42",
-      "check": "trailing_punctuation",
+      "check": "spelling",
       "severity": "warning",
-      "message": "Source ends with '.' but target does not",
-      "source_excerpt": "...end of sentence.",
-      "target_excerpt": "...end of sentence"
+      "message": "Possible misspelling: 'korrektr' (suggestions: korrektor, korrekter, korrekt)",
+      "source_excerpt": "",
+      "target_excerpt": "Das ist ein korrektr Satz..."
     }
   ],
   "summary": {
     "trailing_punctuation": 5,
     "numbers": 3,
-    "double_spaces": 2,
-    "whitespace": 1,
-    "brackets": 1,
-    "terminology": 2
+    "spelling": 2
   }
+}
+```
+
+If spelling is requested but the language is unsupported:
+```json
+{
+  "spelling_skipped": "Language 'ja-JP' not supported for spelling check"
 }
 ```
 
@@ -408,6 +435,10 @@ bun run tauri build
 ```
 
 This creates `XLIFF Chat.dmg` in `desktop/src-tauri/target/release/bundle/dmg/`.
+
+## Acknowledgments
+
+- **Spelling check for Russian, Ukrainian, and English**: [Yandex.Speller](http://api.yandex.ru/speller/)
 
 ## License
 
