@@ -11,7 +11,8 @@ import {
 	ragClear,
 	computeHash,
 	type Segment,
-	type SearchResult
+	type SearchResult,
+	type SearchMode
 } from '$lib/rag';
 import {
 	ragEnabled,
@@ -159,8 +160,8 @@ export async function indexFile(filePath: string): Promise<number> {
 			return segments.length;
 		}
 
-		// Index segments
-		const count = await ragIndex(filePath, fileHash, segments);
+		// Index segments with separate source/target embeddings for better bilingual search
+		const count = await ragIndex(filePath, fileHash, segments, true);
 		indexedFiles.set(filePath, fileHash);
 
 		// Update total indexed count
@@ -195,7 +196,8 @@ export async function searchSegments(
 			await indexFile(filePath);
 		}
 
-		const results = await ragSearch(filePath, query, limit);
+		// Search with "both" mode - returns max score from source, target, or combined embedding
+		const results = await ragSearch(filePath, query, limit, 'both', 0.5);
 		console.log(`RAG: Found ${results.length} segments for query: "${query}"`);
 		return results;
 	} catch (error) {

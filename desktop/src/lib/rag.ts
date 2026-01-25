@@ -26,6 +26,31 @@ export interface RagStats {
 }
 
 /**
+ * Search mode for RAG queries.
+ * - combined: Search source+target combined embedding (default)
+ * - source: Search source text only (for source language queries)
+ * - target: Search target text only (for target language queries)
+ * - both: Search both and return max score
+ */
+export type SearchMode = 'combined' | 'source' | 'target' | 'both';
+
+export interface RagSearchOptions {
+	filePath: string;
+	query: string;
+	limit?: number;
+	mode?: SearchMode;
+	minScore?: number;
+}
+
+export interface RagIndexOptions {
+	filePath: string;
+	fileHash: string;
+	segments: Segment[];
+	/** Create separate source/target embeddings for better search */
+	separateEmbeddings?: boolean;
+}
+
+/**
  * Initialize the RAG embedding client.
  *
  * @param apiKey - OpenAI API key (optional if using Ollama)
@@ -46,18 +71,21 @@ export async function ragInit(apiKey?: string, useOllama = false): Promise<strin
  * @param filePath - Path to the SDLXLIFF file
  * @param fileHash - Hash of file contents (for cache invalidation)
  * @param segments - Segments to index
+ * @param separateEmbeddings - Create separate source/target embeddings (3x API calls but better search)
  * @returns Number of segments indexed
  */
 export async function ragIndex(
 	filePath: string,
 	fileHash: string,
-	segments: Segment[]
+	segments: Segment[],
+	separateEmbeddings = false
 ): Promise<number> {
 	return invoke<number>('rag_index', {
 		request: {
 			file_path: filePath,
 			file_hash: fileHash,
-			segments
+			segments,
+			separate_embeddings: separateEmbeddings
 		}
 	});
 }
@@ -68,18 +96,24 @@ export async function ragIndex(
  * @param filePath - Path to the indexed SDLXLIFF file
  * @param query - Natural language search query
  * @param limit - Maximum results to return (default: 10)
+ * @param mode - Search mode: combined, source, target, or both (default: combined)
+ * @param minScore - Minimum relevance threshold 0.0-1.0 (default: 0.5)
  * @returns Matching segments with relevance scores
  */
 export async function ragSearch(
 	filePath: string,
 	query: string,
-	limit = 10
+	limit = 10,
+	mode: SearchMode = 'combined',
+	minScore = 0.5
 ): Promise<SearchResult[]> {
 	return invoke<SearchResult[]>('rag_search', {
 		request: {
 			file_path: filePath,
 			query,
-			limit
+			limit,
+			mode,
+			min_score: minScore
 		}
 	});
 }

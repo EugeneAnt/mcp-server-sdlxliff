@@ -15,6 +15,8 @@
 	let pullingModel = false;
 	let ollamaRunning = false;
 	let modelInstalled = false;
+	// New model for better multilingual support
+	const OLLAMA_MODEL = 'mxbai-embed-large';
 	let installing = false;
 	let starting = false;
 	let statusMessage = '';
@@ -30,7 +32,7 @@
 	async function refreshOllamaStatus() {
 		ollamaRunning = await checkOllama();
 		if (ollamaRunning) {
-			modelInstalled = await checkOllamaModel('nomic-embed-text');
+			modelInstalled = await checkOllamaModel(OLLAMA_MODEL);
 		}
 	}
 
@@ -88,7 +90,7 @@
 		pullingModel = true;
 		statusMessage = 'Pulling model (this may take a minute)...';
 		try {
-			const result = await pullModel('nomic-embed-text');
+			const result = await pullModel(OLLAMA_MODEL);
 			statusMessage = result;
 			modelInstalled = true;
 		} catch (error) {
@@ -241,7 +243,7 @@
 							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
 							</svg>
-							<span>nomic-embed-text installed</span>
+							<span>{OLLAMA_MODEL} installed</span>
 						</div>
 						{:else}
 						<button

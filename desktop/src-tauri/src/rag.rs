@@ -28,7 +28,27 @@ pub struct Segment {
 #[derive(Clone, Debug)]
 pub(crate) struct IndexedSegment {
     segment: Segment,
+    /// Combined source+target embedding (for general search)
     embedding: Vec<f32>,
+    /// Source-only embedding (for source language queries)
+    source_embedding: Option<Vec<f32>>,
+    /// Target-only embedding (for target language queries)
+    target_embedding: Option<Vec<f32>>,
+}
+
+/// Search mode for RAG queries
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SearchMode {
+    /// Search combined source+target embedding
+    #[default]
+    Combined,
+    /// Search source text only
+    Source,
+    /// Search target text only
+    Target,
+    /// Search both and return max score
+    Both,
 }
 
 #[derive(Debug, Serialize)]
@@ -75,19 +95,55 @@ impl VectorStore {
         self.file_hashes.insert(file_path, file_hash);
     }
 
-    /// Search for similar segments
-    pub fn search(&self, file_path: &str, query_embedding: &[f32], limit: usize) -> Vec<SearchResult> {
+    /// Search for similar segments with mode and threshold
+    pub fn search(
+        &self,
+        file_path: &str,
+        query_embedding: &[f32],
+        limit: usize,
+        mode: &SearchMode,
+        min_score: f32,
+    ) -> Vec<SearchResult> {
         let Some(segments) = self.indices.get(file_path) else {
             return Vec::new();
         };
 
         let mut results: Vec<SearchResult> = segments
             .iter()
-            .map(|indexed| {
-                let score = cosine_similarity(&indexed.embedding, query_embedding);
-                SearchResult {
-                    segment: indexed.segment.clone(),
-                    score,
+            .filter_map(|indexed| {
+                let score = match mode {
+                    SearchMode::Combined => cosine_similarity(&indexed.embedding, query_embedding),
+                    SearchMode::Source => {
+                        indexed.source_embedding.as_ref()
+                            .map(|e| cosine_similarity(e, query_embedding))
+                            .unwrap_or_else(|| cosine_similarity(&indexed.embedding, query_embedding))
+                    }
+                    SearchMode::Target => {
+                        indexed.target_embedding.as_ref()
+                            .map(|e| cosine_similarity(e, query_embedding))
+                            .unwrap_or_else(|| cosine_similarity(&indexed.embedding, query_embedding))
+                    }
+                    SearchMode::Both => {
+                        let source_score = indexed.source_embedding.as_ref()
+                            .map(|e| cosine_similarity(e, query_embedding))
+                            .unwrap_or(0.0);
+                        let target_score = indexed.target_embedding.as_ref()
+                            .map(|e| cosine_similarity(e, query_embedding))
+                            .unwrap_or(0.0);
+                        let combined_score = cosine_similarity(&indexed.embedding, query_embedding);
+                        // Return max of all three
+                        source_score.max(target_score).max(combined_score)
+                    }
+                };
+
+                // Apply threshold filter
+                if score >= min_score {
+                    Some(SearchResult {
+                        segment: indexed.segment.clone(),
+                        score,
+                    })
+                } else {
+                    None
                 }
             })
             .collect();
@@ -179,7 +235,17 @@ impl EmbeddingClient {
     }
 
     /// Create client for local Ollama
+    /// Uses mxbai-embed-large for better multilingual support
     pub fn ollama() -> Self {
+        Self::new(
+            "http://localhost:11434/api/embeddings".to_string(),
+            None,
+            "mxbai-embed-large".to_string(),
+        )
+    }
+
+    /// Create client for local Ollama with nomic (smaller, faster)
+    pub fn ollama_nomic() -> Self {
         Self::new(
             "http://localhost:11434/api/embeddings".to_string(),
             None,
@@ -317,11 +383,13 @@ pub fn init_client(state: &RagState, api_key: Option<String>, use_ollama: bool) 
 }
 
 /// Index segments for a file
+/// When separate_embeddings is true, creates separate source/target embeddings for better search
 pub async fn index_segments(
     state: &RagState,
     file_path: String,
     file_hash: String,
     segments: Vec<Segment>,
+    separate_embeddings: bool,
 ) -> Result<usize, String> {
     // Check if already indexed
     {
@@ -337,28 +405,48 @@ pub async fn index_segments(
         guard.clone().ok_or("Embedding client not initialized")?
     };
 
-    // Prepare texts for embedding (combine source + target for better semantic matching)
-    let texts: Vec<String> = segments
+    // Prepare combined texts for embedding
+    let combined_texts: Vec<String> = segments
         .iter()
         .map(|s| format!("Source: {} Target: {}", s.source, s.target))
         .collect();
 
-    // Get embeddings
-    let embeddings = client.embed(texts).await?;
+    // Get combined embeddings
+    let combined_embeddings = client.embed(combined_texts).await?;
 
-    if embeddings.len() != segments.len() {
+    if combined_embeddings.len() != segments.len() {
         return Err(format!(
             "Embedding count mismatch: {} vs {}",
-            embeddings.len(),
+            combined_embeddings.len(),
             segments.len()
         ));
     }
 
+    // Optionally get separate source/target embeddings
+    let (source_embeddings, target_embeddings) = if separate_embeddings {
+        let source_texts: Vec<String> = segments.iter().map(|s| s.source.clone()).collect();
+        let target_texts: Vec<String> = segments.iter().map(|s| s.target.clone()).collect();
+
+        let source_emb = client.embed(source_texts).await?;
+        let target_emb = client.embed(target_texts).await?;
+
+        (Some(source_emb), Some(target_emb))
+    } else {
+        (None, None)
+    };
+
     // Create indexed segments
     let indexed: Vec<IndexedSegment> = segments
         .into_iter()
-        .zip(embeddings.into_iter())
-        .map(|(segment, embedding)| IndexedSegment { segment, embedding })
+        .enumerate()
+        .map(|(i, segment)| {
+            IndexedSegment {
+                segment,
+                embedding: combined_embeddings[i].clone(),
+                source_embedding: source_embeddings.as_ref().map(|v| v[i].clone()),
+                target_embedding: target_embeddings.as_ref().map(|v| v[i].clone()),
+            }
+        })
         .collect();
 
     let count = indexed.len();
@@ -373,11 +461,15 @@ pub async fn index_segments(
 }
 
 /// Search for similar segments
+/// - mode: search combined, source-only, target-only, or both
+/// - min_score: minimum relevance threshold (0.0-1.0, default 0.5)
 pub async fn search_segments(
     state: &RagState,
     file_path: String,
     query: String,
     limit: usize,
+    mode: SearchMode,
+    min_score: f32,
 ) -> Result<Vec<SearchResult>, String> {
     // Get embedding client
     let client = {
@@ -388,9 +480,9 @@ pub async fn search_segments(
     // Embed query
     let query_embedding = client.embed_one(query).await?;
 
-    // Search
+    // Search with mode and threshold
     let store = state.store.lock().map_err(|e| e.to_string())?;
-    Ok(store.search(&file_path, &query_embedding, limit))
+    Ok(store.search(&file_path, &query_embedding, limit, &mode, min_score))
 }
 
 /// Get RAG stats

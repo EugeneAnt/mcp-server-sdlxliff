@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 mod rag;
-use rag::{RagState, Segment, SearchResult};
+use rag::{RagState, Segment, SearchResult, SearchMode};
 
 // ============================================================================
 // MCP Server State
@@ -502,11 +502,20 @@ struct RagIndexRequest {
     file_path: String,
     file_hash: String,
     segments: Vec<Segment>,
+    #[serde(default)]
+    separate_embeddings: bool,
 }
 
 #[tauri::command]
 async fn rag_index(state: State<'_, RagState>, request: RagIndexRequest) -> Result<usize, String> {
-    rag::index_segments(&state, request.file_path, request.file_hash, request.segments).await
+    rag::index_segments(
+        &state,
+        request.file_path,
+        request.file_hash,
+        request.segments,
+        request.separate_embeddings,
+    )
+    .await
 }
 
 #[derive(Deserialize)]
@@ -514,6 +523,10 @@ struct RagSearchRequest {
     file_path: String,
     query: String,
     limit: Option<usize>,
+    #[serde(default)]
+    mode: SearchMode,
+    /// Minimum relevance score (0.0-1.0). Default: 0.5
+    min_score: Option<f32>,
 }
 
 #[tauri::command]
@@ -526,6 +539,8 @@ async fn rag_search(
         request.file_path,
         request.query,
         request.limit.unwrap_or(10),
+        request.mode,
+        request.min_score.unwrap_or(0.5),
     )
     .await
 }
