@@ -114,11 +114,16 @@ export class McpClient {
 		description: string;
 		input_schema: Record<string, unknown>;
 	}> {
-		return this.tools.map(tool => ({
-			name: tool.name,
-			description: tool.description,
-			input_schema: tool.inputSchema
-		}));
+		// Filter out tools that are used internally but shouldn't be called directly by LLM
+		const hiddenTools = ['validate_sdlxliff_segment'];
+
+		return this.tools
+			.filter(tool => !hiddenTools.includes(tool.name))
+			.map(tool => ({
+				name: tool.name,
+				description: tool.description,
+				input_schema: tool.inputSchema
+			}));
 	}
 
 	async callTool(name: string, args: Record<string, unknown>): Promise<McpToolResult> {

@@ -1,18 +1,21 @@
 <script lang="ts">
 	import {
 		sessionIssues,
-		resolveIssue,
-		unresolveIssue,
+		skipIssue,
+		unskipIssue,
+		getApplicableIssues,
 		exportAsMarkdown,
 		exportAsCsv,
 		type Issue
 	} from '$lib/stores/issues';
+	import { applyAllFixes, isApplyingFixes } from '$lib/services/chatService';
 
 	let expandedTypes: Set<string> = new Set();
 	let showExportMenu = false;
 
-	// Group issues by type
-	$: issuesByType = $sessionIssues.reduce(
+	// Group issues by type (exclude applied)
+	$: activeIssues = $sessionIssues.filter((i) => !i.applied);
+	$: issuesByType = activeIssues.reduce(
 		(acc, issue) => {
 			const list = acc.get(issue.issue_type) || [];
 			list.push(issue);
@@ -22,7 +25,9 @@
 		new Map<string, Issue[]>()
 	);
 
-	$: unresolvedCount = $sessionIssues.filter((i) => !i.resolved).length;
+	$: pendingCount = $sessionIssues.filter((i) => !i.skipped && !i.applied).length;
+	$: applicableCount = $sessionIssues.filter((i) => !i.skipped && !i.applied && i.suggested_fix).length;
+	$: appliedCount = $sessionIssues.filter((i) => i.applied).length;
 	$: totalCount = $sessionIssues.length;
 
 	function toggleType(type: string) {
@@ -32,6 +37,14 @@
 			expandedTypes.add(type);
 		}
 		expandedTypes = expandedTypes; // trigger reactivity
+	}
+
+	function toggleSkip(issue: Issue) {
+		if (issue.skipped) {
+			unskipIssue(issue.id);
+		} else {
+			skipIssue(issue.id);
+		}
 	}
 
 	function formatType(type: string): string {
@@ -84,7 +97,10 @@
 		<span class="text-sm font-medium text-zinc-400 uppercase tracking-wide">
 			Issues
 			{#if totalCount > 0}
-				<span class="text-zinc-500">({unresolvedCount}/{totalCount})</span>
+				<span class="text-zinc-500">({pendingCount}/{totalCount})</span>
+				{#if appliedCount > 0}
+					<span class="text-green-500 text-xs ml-1">✓{appliedCount}</span>
+				{/if}
 			{/if}
 		</span>
 
@@ -116,6 +132,29 @@
 		{/if}
 	</div>
 
+	<!-- Apply All Button -->
+	{#if applicableCount > 0}
+		<div class="px-4 py-2 bg-zinc-800/50 border-b border-zinc-700">
+			<button
+				onclick={applyAllFixes}
+				disabled={$isApplyingFixes}
+				class="w-full py-2 px-3 text-sm font-medium rounded transition-colors
+					{$isApplyingFixes
+						? 'bg-zinc-700 text-zinc-500 cursor-wait'
+						: 'bg-blue-600 hover:bg-blue-500 text-white'}"
+			>
+				{#if $isApplyingFixes}
+					Applying...
+				{:else}
+					Apply All Fixes ({applicableCount})
+				{/if}
+			</button>
+			<p class="text-[10px] text-zinc-600 mt-1 text-center">
+				Non-skipped issues with suggested fixes
+			</p>
+		</div>
+	{/if}
+
 	<!-- Issues List -->
 	<div class="flex-1 overflow-y-auto">
 		{#if totalCount === 0}
@@ -125,7 +164,7 @@
 			</div>
 		{:else}
 			{#each [...issuesByType.entries()] as [type, issues]}
-				{@const unresolvedInType = issues.filter((i) => !i.resolved).length}
+				{@const pendingInType = issues.filter((i) => !i.skipped).length}
 				<div class="border-b border-zinc-700/50">
 					<!-- Type Header -->
 					<button
@@ -153,7 +192,7 @@
 							{formatType(type)}
 						</span>
 						<span class="text-xs text-zinc-500">
-							{unresolvedInType}/{issues.length}
+							{pendingInType}/{issues.length}
 						</span>
 					</button>
 
@@ -162,8 +201,8 @@
 						<div class="px-3 pb-2 space-y-1.5">
 							{#each issues as issue}
 								<div
-									class="bg-zinc-900/50 rounded p-2 text-xs {issue.resolved
-										? 'opacity-50'
+									class="bg-zinc-900/50 rounded p-2 text-xs {issue.skipped
+										? 'opacity-40'
 										: ''}"
 								>
 									<div class="flex items-center justify-between mb-1">
@@ -179,43 +218,20 @@
 												{issue.severity}
 											</span>
 											<button
-												onclick={() =>
-													issue.resolved
-														? unresolveIssue(issue.id)
-														: resolveIssue(issue.id)}
-												class="text-zinc-500 hover:text-zinc-300 transition-colors"
-												title={issue.resolved ? 'Mark unresolved' : 'Mark resolved'}
+												onclick={() => toggleSkip(issue)}
+												class="text-zinc-500 hover:text-zinc-300 transition-colors px-1"
+												title={issue.skipped ? 'Include in batch apply' : 'Skip this issue'}
 											>
-												{#if issue.resolved}
-													<svg
-														xmlns="http://www.w3.org/2000/svg"
-														width="14"
-														height="14"
-														viewBox="0 0 24 24"
-														fill="none"
-														stroke="currentColor"
-														stroke-width="2"
-													>
-														<path d="M3 12l6 6L21 6" />
-													</svg>
+												{#if issue.skipped}
+													<span class="text-[10px] text-zinc-600">SKIPPED</span>
 												{:else}
-													<svg
-														xmlns="http://www.w3.org/2000/svg"
-														width="14"
-														height="14"
-														viewBox="0 0 24 24"
-														fill="none"
-														stroke="currentColor"
-														stroke-width="2"
-													>
-														<circle cx="12" cy="12" r="10" />
-													</svg>
+													<span class="text-[10px]">Skip</span>
 												{/if}
 											</button>
 										</div>
 									</div>
 
-									<p class="text-zinc-400 mb-1 {issue.resolved ? 'line-through' : ''}">
+									<p class="text-zinc-400 mb-1 {issue.skipped ? 'line-through' : ''}">
 										{issue.message}
 									</p>
 
@@ -228,9 +244,11 @@
 										</div>
 									{/if}
 
-									{#if issue.suggested_fix}
-										<div class="text-green-400/70 mt-1 text-[10px]">
-											→ {issue.suggested_fix}
+									{#if issue.suggested_fix && !issue.skipped}
+										<div class="text-green-400/70 mt-1 text-[10px] break-all">
+											→ {issue.suggested_fix.length > 100
+												? issue.suggested_fix.slice(0, 100) + '...'
+												: issue.suggested_fix}
 										</div>
 									{/if}
 								</div>

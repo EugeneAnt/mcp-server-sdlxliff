@@ -18,32 +18,56 @@ export interface Issue {
 	suggested_fix?: string;
 	source_tool: 'qa_check' | 'manual_review' | 'rag_search';
 	timestamp: number;
-	resolved: boolean;
+	skipped: boolean; // User chose to skip this (false positive, intentional, etc.)
+	applied: boolean; // Fix was applied to the file
 }
 
 export const sessionIssues = writable<Issue[]>([]);
 
 /**
  * Add an issue to the tracker with deduplication.
- * If same segment_id + issue_type exists and is unresolved, updates it instead.
+ *
+ * Deduplication strategy:
+ * - If issue has suggested_fix: dedupe by segment_id only (one fix per segment)
+ * - If issue has no suggested_fix: dedupe by segment_id + issue_type (multiple observations OK)
+ *
+ * This ensures that when discussing fixes, later corrections update rather than duplicate.
  */
-export function addIssue(issue: Omit<Issue, 'id' | 'timestamp' | 'resolved'>): void {
+export function addIssue(issue: Omit<Issue, 'id' | 'timestamp' | 'skipped' | 'applied'>): void {
 	sessionIssues.update((issues) => {
-		// Check for existing unresolved issue with same segment + type
-		const existingIndex = issues.findIndex(
-			(i) =>
-				i.segment_id === issue.segment_id &&
-				i.issue_type === issue.issue_type &&
-				!i.resolved
-		);
+		let existingIndex = -1;
+
+		if (issue.suggested_fix) {
+			// Has a fix: dedupe by segment_id only (one actionable fix per segment)
+			existingIndex = issues.findIndex(
+				(i) =>
+					i.segment_id === issue.segment_id &&
+					i.suggested_fix && // also has a fix
+					!i.skipped &&
+					!i.applied
+			);
+		} else {
+			// No fix (observation only): dedupe by segment_id + issue_type
+			existingIndex = issues.findIndex(
+				(i) =>
+					i.segment_id === issue.segment_id &&
+					i.issue_type === issue.issue_type &&
+					!i.skipped &&
+					!i.applied
+			);
+		}
 
 		if (existingIndex !== -1) {
 			// Update existing issue
 			const updated = [...issues];
 			updated[existingIndex] = {
 				...updated[existingIndex],
+				issue_type: issue.issue_type, // Update type if refined
 				message: issue.message, // Use latest message
 				suggested_fix: issue.suggested_fix ?? updated[existingIndex].suggested_fix,
+				source: issue.source || updated[existingIndex].source,
+				target: issue.target || updated[existingIndex].target,
+				severity: issue.severity,
 				timestamp: Date.now()
 			};
 			return updated;
@@ -56,7 +80,8 @@ export function addIssue(issue: Omit<Issue, 'id' | 'timestamp' | 'resolved'>): v
 				...issue,
 				id: crypto.randomUUID(),
 				timestamp: Date.now(),
-				resolved: false
+				skipped: false,
+				applied: false
 			}
 		];
 	});
@@ -65,7 +90,7 @@ export function addIssue(issue: Omit<Issue, 'id' | 'timestamp' | 'resolved'>): v
 /**
  * Add multiple issues at once (used for QA auto-populate)
  */
-export function addIssues(issues: Omit<Issue, 'id' | 'timestamp' | 'resolved'>[]): number {
+export function addIssues(issues: Omit<Issue, 'id' | 'timestamp' | 'skipped' | 'applied'>[]): number {
 	let added = 0;
 	for (const issue of issues) {
 		const before = get(sessionIssues).length;
@@ -76,21 +101,37 @@ export function addIssues(issues: Omit<Issue, 'id' | 'timestamp' | 'resolved'>[]
 }
 
 /**
- * Mark an issue as resolved
+ * Mark an issue as skipped (won't be applied in batch)
  */
-export function resolveIssue(id: string): void {
+export function skipIssue(id: string): void {
 	sessionIssues.update((issues) =>
-		issues.map((i) => (i.id === id ? { ...i, resolved: true } : i))
+		issues.map((i) => (i.id === id ? { ...i, skipped: true } : i))
 	);
 }
 
 /**
- * Mark an issue as unresolved
+ * Unskip an issue (will be included in batch apply)
  */
-export function unresolveIssue(id: string): void {
+export function unskipIssue(id: string): void {
 	sessionIssues.update((issues) =>
-		issues.map((i) => (i.id === id ? { ...i, resolved: false } : i))
+		issues.map((i) => (i.id === id ? { ...i, skipped: false } : i))
 	);
+}
+
+/**
+ * Mark an issue as applied (fix was written to file)
+ */
+export function markIssueApplied(id: string): void {
+	sessionIssues.update((issues) =>
+		issues.map((i) => (i.id === id ? { ...i, applied: true } : i))
+	);
+}
+
+/**
+ * Get all issues that can be applied (not skipped, not applied, has suggested_fix)
+ */
+export function getApplicableIssues(): Issue[] {
+	return get(sessionIssues).filter((i) => !i.skipped && !i.applied && i.suggested_fix);
 }
 
 /**
@@ -103,13 +144,23 @@ export function clearIssues(): void {
 /**
  * Get issue counts by status
  */
-export function getIssueCounts(): { total: number; resolved: number; unresolved: number } {
+export function getIssueCounts(): {
+	total: number;
+	pending: number;
+	skipped: number;
+	applied: number;
+	applicable: number;
+} {
 	const issues = get(sessionIssues);
-	const resolved = issues.filter((i) => i.resolved).length;
+	const skipped = issues.filter((i) => i.skipped).length;
+	const applied = issues.filter((i) => i.applied).length;
+	const applicable = issues.filter((i) => !i.skipped && !i.applied && i.suggested_fix).length;
 	return {
 		total: issues.length,
-		resolved,
-		unresolved: issues.length - resolved
+		pending: issues.length - skipped - applied,
+		skipped,
+		applied,
+		applicable
 	};
 }
 
@@ -120,22 +171,23 @@ export function exportAsMarkdown(): string {
 	const issues = get(sessionIssues);
 	if (issues.length === 0) return '# Translation Issues\n\nNo issues found.';
 
-	const unresolved = issues.filter((i) => !i.resolved);
-	const resolved = issues.filter((i) => i.resolved);
+	const pending = issues.filter((i) => !i.skipped && !i.applied);
+	const applied = issues.filter((i) => i.applied);
+	const skipped = issues.filter((i) => i.skipped);
 
-	// Group by type
+	// Group pending by type
 	const byType = new Map<string, Issue[]>();
-	for (const issue of unresolved) {
+	for (const issue of pending) {
 		const list = byType.get(issue.issue_type) || [];
 		list.push(issue);
 		byType.set(issue.issue_type, list);
 	}
 
 	let md = `# Translation Issues\n\n`;
-	md += `**Total:** ${issues.length} | **Unresolved:** ${unresolved.length} | **Resolved:** ${resolved.length}\n\n`;
+	md += `**Total:** ${issues.length} | **Pending:** ${pending.length} | **Applied:** ${applied.length} | **Skipped:** ${skipped.length}\n\n`;
 
-	if (unresolved.length > 0) {
-		md += `## Unresolved Issues\n\n`;
+	if (pending.length > 0) {
+		md += `## Pending Issues\n\n`;
 		for (const [type, typeIssues] of byType) {
 			md += `### ${formatIssueType(type)} (${typeIssues.length})\n\n`;
 			for (const issue of typeIssues) {
@@ -148,9 +200,17 @@ export function exportAsMarkdown(): string {
 		}
 	}
 
-	if (resolved.length > 0) {
-		md += `## Resolved Issues (${resolved.length})\n\n`;
-		for (const issue of resolved) {
+	if (applied.length > 0) {
+		md += `## Applied Fixes (${applied.length})\n\n`;
+		for (const issue of applied) {
+			md += `- ✓ Segment ${issue.segment_id}: ${issue.message}\n`;
+		}
+		md += '\n';
+	}
+
+	if (skipped.length > 0) {
+		md += `## Skipped Issues (${skipped.length})\n\n`;
+		for (const issue of skipped) {
 			md += `- ~~Segment ${issue.segment_id}: ${issue.message}~~\n`;
 		}
 	}
@@ -164,16 +224,21 @@ export function exportAsMarkdown(): string {
 export function exportAsCsv(): string {
 	const issues = get(sessionIssues);
 	const headers = ['Segment ID', 'Type', 'Severity', 'Message', 'Source', 'Target', 'Suggested Fix', 'Status'];
-	const rows = issues.map((i) => [
-		i.segment_id,
-		i.issue_type,
-		i.severity,
-		`"${i.message.replace(/"/g, '""')}"`,
-		`"${(i.source || '').replace(/"/g, '""')}"`,
-		`"${(i.target || '').replace(/"/g, '""')}"`,
-		`"${(i.suggested_fix || '').replace(/"/g, '""')}"`,
-		i.resolved ? 'Resolved' : 'Open'
-	]);
+	const rows = issues.map((i) => {
+		let status = 'Pending';
+		if (i.applied) status = 'Applied';
+		else if (i.skipped) status = 'Skipped';
+		return [
+			i.segment_id,
+			i.issue_type,
+			i.severity,
+			`"${i.message.replace(/"/g, '""')}"`,
+			`"${(i.source || '').replace(/"/g, '""')}"`,
+			`"${(i.target || '').replace(/"/g, '""')}"`,
+			`"${(i.suggested_fix || '').replace(/"/g, '""')}"`,
+			status
+		];
+	});
 
 	return [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
 }

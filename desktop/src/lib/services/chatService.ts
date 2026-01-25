@@ -1,4 +1,4 @@
-import { get } from 'svelte/store';
+import { get, writable } from 'svelte/store';
 import {
 	initializeClient,
 	clearClient,
@@ -41,6 +41,8 @@ import {
 	addIssues,
 	clearIssues,
 	getIssueCounts,
+	getApplicableIssues,
+	markIssueApplied,
 	type Issue
 } from '$lib/stores/issues';
 import {
@@ -61,44 +63,49 @@ const systemPrompt = `You are an SDLXLIFF translation assistant. You help users 
 ## Available Tools
 
 - read_sdlxliff: Read segments (paginated, max 50 per request)
-- get_sdlxliff_segment: Get a specific segment by ID
-- update_sdlxliff_segment: Update a translation
-- save_sdlxliff: Save changes to the file
+- get_sdlxliff_segment: Get a specific segment by ID (includes tags)
+- update_sdlxliff_segment: Update a single segment directly (use sparingly)
+- save_sdlxliff: Save changes to file
 - get_sdlxliff_statistics: Get file statistics and language info
-- validate_sdlxliff_segment: Validate a translation before updating
 - qa_check_sdlxliff: Run regex-based QA checks (issues auto-tracked)
 - rag_search: Semantic search to find segments by meaning
-- add_issue_to_report: Log actionable issues to session tracker
-
-## Tool Usage Strategy
-
-**For TARGETED queries** (find specific content):
-→ Use rag_search("term or concept")
-→ Returns only relevant segments, minimal context cost
-→ Example: "find segments about privacy" → rag_search("privacy policy")
-
-**For COMPREHENSIVE review** (check all segments):
-→ First ask: "Smart sampling (faster) or full review (thorough)?"
-→ Smart sampling: Use rag_search for high-risk segments:
-  - rag_search("technical terminology")
-  - rag_search("long complex sentences")
-  - rag_search("error messages")
-→ Full review: Use read_sdlxliff in batches (offset pagination)
-
-**For QA checks** (punctuation, numbers, consistency):
-→ Use qa_check_sdlxliff - runs server-side, no context cost
-→ Issues automatically appear in the Issues Panel
-
-**When you find problems**:
-→ Use add_issue_to_report for actionable issues that need fixing
-→ Skip minor stylistic observations unless they're patterns
+- add_issue_to_report: Log issues with suggested fixes to Issues panel
+- apply_pending_fixes: Batch apply all non-skipped fixes from Issues panel
 
 ## Workflow
 
-1. Use get_sdlxliff_statistics first to understand the file
-2. Choose tool based on task type (see strategy above)
-3. Use update_sdlxliff_segment to fix translations
-4. Use save_sdlxliff to persist changes
+1. **Check translations**: Use qa_check_sdlxliff and/or read segments
+2. **Identify issues**: Use add_issue_to_report with suggested_fix (FULL target text with tags)
+3. **Discuss with user**: Refine fixes as needed (updates existing issue for same segment)
+4. **Apply edits**: When user asks to apply/save, call apply_pending_fixes
+
+## Important: How to Report Issues
+
+When you find a problem that needs fixing, use add_issue_to_report with:
+- suggested_fix: The COMPLETE new target text (not a description, the actual text)
+- If segment has tags, include them: "Он также {49}запустил{/49} новый проект"
+- One fix per segment (later fixes update earlier ones)
+
+Example:
+  add_issue_to_report({
+    segment_id: "7",
+    issue_type: "spelling",
+    message: "Spelling error: инвестеционной → инвестиционной",
+    suggested_fix: "Полный текст перевода с исправленной ошибкой здесь",
+    severity: "error"
+  })
+
+## Tool Usage Strategy
+
+**For TARGETED queries**: Use rag_search("term or concept")
+**For QA checks**: Use qa_check_sdlxliff (issues auto-populate)
+**For COMPREHENSIVE review**: Ask user preference, then read in batches
+
+## DO NOT
+
+- Do NOT call update_sdlxliff_segment directly unless user explicitly asks for immediate single edit
+- Instead, collect issues via add_issue_to_report, then apply_pending_fixes when ready
+- This lets users review and skip false positives before applying
 
 Be helpful and concise. Preserve formatting and tags in translations.`;
 
@@ -165,6 +172,26 @@ const addIssueToolDefinition = {
 		required: ['segment_id', 'issue_type', 'message']
 	}
 };
+
+// Apply pending fixes tool (LLM calls this to batch-apply from Issues panel)
+const applyPendingFixesToolDefinition = {
+	name: 'apply_pending_fixes',
+	description:
+		'Apply all pending fixes from the Issues panel. Reads non-skipped issues with suggested_fix, validates each, updates segments, and saves the file. Call this when user asks to "apply edits", "make the fixes", or "save corrections".',
+	input_schema: {
+		type: 'object' as const,
+		properties: {
+			file_path: {
+				type: 'string',
+				description: 'Path to the SDLXLIFF file to update'
+			}
+		},
+		required: ['file_path']
+	}
+};
+
+// State for UI feedback
+export const isApplyingFixes = writable(false);
 
 // Scroll callbacks - set by components
 let scrollMessagesCallback: (() => void) | null = null;
@@ -315,6 +342,9 @@ async function handleToolCall(toolUse: ToolUseBlock): Promise<string> {
 			source?: string;
 			target?: string;
 		});
+	} else if (toolUse.name === 'apply_pending_fixes') {
+		// Handle batch apply from Issues panel
+		resultText = await handleApplyPendingFixes(toolUse.input as { file_path: string });
 	} else {
 		// Handle MCP tools
 		const client = getMcpClient();
@@ -421,6 +451,112 @@ function handleAddIssue(input: {
 }
 
 /**
+ * Handle apply_pending_fixes tool call - batch apply from Issues panel
+ */
+async function handleApplyPendingFixes(input: { file_path: string }): Promise<string> {
+	const { file_path } = input;
+	const client = getMcpClient();
+
+	if (!client) {
+		return JSON.stringify({ error: 'MCP server not connected' });
+	}
+
+	const applicableIssues = getApplicableIssues();
+
+	if (applicableIssues.length === 0) {
+		return JSON.stringify({
+			applied: 0,
+			message: 'No applicable issues found. Issues must have suggested_fix and not be skipped.'
+		});
+	}
+
+	isApplyingFixes.set(true);
+
+	const results: { segment_id: string; status: 'success' | 'error'; message?: string }[] = [];
+
+	try {
+		// Apply each fix
+		for (const issue of applicableIssues) {
+			try {
+				// Validate first (optional - check if tags are preserved)
+				const validateResult = await client.callTool('validate_sdlxliff_segment', {
+					file_path,
+					segment_id: issue.segment_id,
+					new_target: issue.suggested_fix
+				});
+				const validation = JSON.parse(validateResult.content[0].text || '{}');
+
+				if (!validation.valid) {
+					results.push({
+						segment_id: issue.segment_id,
+						status: 'error',
+						message: `Validation failed: ${validation.errors?.join(', ') || 'unknown error'}`
+					});
+					continue;
+				}
+
+				// Apply the fix
+				await client.callTool('update_sdlxliff_segment', {
+					file_path,
+					segment_id: issue.segment_id,
+					target_text: issue.suggested_fix
+				});
+
+				// Mark as applied
+				markIssueApplied(issue.id);
+				results.push({ segment_id: issue.segment_id, status: 'success' });
+			} catch (err) {
+				results.push({
+					segment_id: issue.segment_id,
+					status: 'error',
+					message: err instanceof Error ? err.message : 'Unknown error'
+				});
+			}
+		}
+
+		// Save the file once after all updates
+		const successCount = results.filter((r) => r.status === 'success').length;
+		if (successCount > 0) {
+			await client.callTool('save_sdlxliff', { file_path });
+		}
+
+		const response = {
+			applied: successCount,
+			failed: results.filter((r) => r.status === 'error').length,
+			total: applicableIssues.length,
+			results,
+			message: successCount > 0 ? `Applied ${successCount} fixes and saved file.` : 'No fixes applied.'
+		};
+
+		return JSON.stringify(response, null, 2);
+	} finally {
+		isApplyingFixes.set(false);
+	}
+}
+
+/**
+ * Exported function for UI "Apply All" button (alternative to LLM tool call)
+ */
+export async function applyAllFixes(): Promise<void> {
+	const paths = get(selectedPaths);
+	if (paths.length === 0) {
+		alert('No file selected');
+		return;
+	}
+
+	const result = await handleApplyPendingFixes({ file_path: paths[0] });
+	const parsed = JSON.parse(result);
+
+	if (parsed.error) {
+		alert(`Error: ${parsed.error}`);
+	} else if (parsed.applied > 0) {
+		alert(`Applied ${parsed.applied} fixes and saved.`);
+	} else {
+		alert(parsed.message || 'No fixes to apply.');
+	}
+}
+
+/**
  * Auto-populate issues from QA tool response
  */
 function autoPopulateIssuesFromQA(resultText: string): void {
@@ -428,7 +564,7 @@ function autoPopulateIssuesFromQA(resultText: string): void {
 		const qaResult = JSON.parse(resultText);
 		if (!qaResult.issues || !Array.isArray(qaResult.issues)) return;
 
-		const issues: Omit<Issue, 'id' | 'timestamp' | 'resolved'>[] = qaResult.issues.map(
+		const issues: Omit<Issue, 'id' | 'timestamp' | 'skipped' | 'applied'>[] = qaResult.issues.map(
 			(issue: {
 				segment_id: string;
 				check: string;
@@ -499,9 +635,10 @@ export async function sendMessage(): Promise<void> {
 			tools.push(ragToolDefinition);
 		}
 
-		// Add issue tracking tool (always available when MCP connected)
+		// Add issue tracking and apply tools (always available when MCP connected)
 		if (connected) {
 			tools.push(addIssueToolDefinition);
+			tools.push(applyPendingFixesToolDefinition);
 		}
 
 		const model = get(selectedModel);
