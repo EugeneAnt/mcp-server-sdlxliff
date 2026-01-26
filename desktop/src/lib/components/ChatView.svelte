@@ -1,7 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { displayMessages, isLoading, shouldAutoScroll } from '$lib/stores/chat';
+	import { displayMessages, isLoading, shouldAutoScroll, inputValue } from '$lib/stores/chat';
 	import { mcpConnected, mcpError } from '$lib/stores/mcp';
+	import { selectedPaths } from '$lib/stores/files';
+	import { sendMessage } from '$lib/services/chatService';
+	import QuickActions from './QuickActions.svelte';
 
 	let messagesContainer: HTMLDivElement;
 	let lastMessageCount = 0;
@@ -28,15 +31,29 @@
 			}, 0);
 		}
 	}
+
+	// Handle quick action selection
+	function handleQuickAction(event: CustomEvent<string>) {
+		inputValue.set(event.detail);
+		sendMessage();
+	}
+
+	$: hasFile = $selectedPaths.length > 0;
 </script>
 
 <div bind:this={messagesContainer} onscroll={handleScroll} class="flex-1 overflow-y-auto p-4">
 	{#if $displayMessages.length === 0}
-		<div class="text-center text-zinc-500 mt-16">
-			<p>Start a conversation to translate and edit SDLXLIFF files.</p>
-			<p class="text-sm text-zinc-600 italic mt-2">Try: "Open ~/Documents/sample.sdlxliff and show me the statistics"</p>
+		<div class="text-center text-zinc-500 mt-12">
+			{#if hasFile}
+				<p class="text-zinc-400">What would you like to do?</p>
+				<QuickActions on:select={handleQuickAction} />
+				<p class="text-xs text-zinc-600 mt-6">Or type your own request below</p>
+			{:else}
+				<p>Start a conversation to translate and edit SDLXLIFF files.</p>
+				<p class="text-sm text-zinc-600 mt-2">Select a file first, then choose an action or type your request.</p>
+			{/if}
 			{#if !$mcpConnected && $mcpError}
-				<p class="text-sm text-red-400 mt-2">MCP Error: {$mcpError}</p>
+				<p class="text-sm text-red-400 mt-4">MCP Error: {$mcpError}</p>
 			{/if}
 		</div>
 	{/if}

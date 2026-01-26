@@ -1,0 +1,28 @@
+{
+  "actions": [
+    {
+      "id": "comprehensive",
+      "label": "Comprehensive Check",
+      "icon": "clipboard-check",
+      "prompt": "Check translations for:\n\n**Numbers & Data**\n- Numeric values match source exactly\n- Number formatting follows target locale (spaces/commas)\n- Dates, currencies, measurements preserved\n\n**Language Quality**\n- Spelling errors in target text\n- Grammar and syntax correctness\n- Natural word order and collocations\n\n**Consistency**\n- Brand names: keep original or translate consistently\n- Terms: same source term = same translation\n- Mixed language: avoid partial translations\n\n**Content Integrity**\n- No added or omitted information\n- URLs and links unchanged\n- Cross-references match (names, institutions)\n\n**Formatting**\n- All source tags present in target\n- Tag boundaries match logical units\n\nReport each issue with segment ID, source text, target text, and what's wrong."
+    },
+    {
+      "id": "qa",
+      "label": "QA Check",
+      "icon": "search",
+      "prompt": "Run a QA check on all segments. Include spelling check."
+    },
+    {
+      "id": "statistics",
+      "label": "Statistics",
+      "icon": "chart",
+      "prompt": "Show me the file statistics: total segments, translated vs. draft, word counts, and target language."
+    },
+    {
+      "id": "untranslated",
+      "label": "Find Untranslated",
+      "icon": "alert",
+      "prompt": "Find and list all untranslated or draft segments that need attention."
+    }
+  ]
+}
