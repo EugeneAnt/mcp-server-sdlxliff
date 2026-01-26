@@ -610,9 +610,13 @@ def _check_spelling_yandex(
     # IGNORE_CAPITALIZATION = 512 (ignore case errors)
     options = 2 + 4  # IGNORE_DIGITS + IGNORE_URLS
 
+    # Sanitize text: replace special Unicode punctuation that breaks Yandex API
+    # «» (Russian quotes) and — (em-dash) cause empty responses
+    sanitized_target = target.replace('«', '"').replace('»', '"').replace('—', '-').replace('–', '-')
+
     # Prepare request
     params = urllib.parse.urlencode({
-        'text': target,
+        'text': sanitized_target,
         'lang': lang_code,
         'options': options,
     })
