@@ -1,42 +1,44 @@
 <script lang="ts">
+	import { SvelteSet } from 'svelte/reactivity';
 	import {
 		sessionIssues,
 		skipIssue,
 		unskipIssue,
-		getApplicableIssues,
 		exportAsMarkdown,
 		exportAsCsv,
 		type Issue
 	} from '$lib/stores/issues';
 	import { applyAllFixes, isApplyingFixes } from '$lib/services/chatService';
 
-	let expandedTypes: Set<string> = new Set();
-	let showExportMenu = false;
+	// Svelte 5: $state() for local reactive state
+	let expandedTypes = $state(new SvelteSet<string>());
+	let showExportMenu = $state(false);
 
-	// Group issues by type (exclude applied)
-	$: activeIssues = $sessionIssues.filter((i) => !i.applied);
-	$: issuesByType = activeIssues.reduce(
-		(acc, issue) => {
+	// Svelte 5: $derived() replaces $: for computed values
+	// Note: $sessionIssues still works - stores are compatible with runes
+	const activeIssues = $derived($sessionIssues.filter((i) => !i.applied));
+
+	const issuesByType = $derived(
+		activeIssues.reduce((acc, issue) => {
 			const list = acc.get(issue.issue_type) || [];
 			list.push(issue);
 			acc.set(issue.issue_type, list);
 			return acc;
-		},
-		new Map<string, Issue[]>()
+		}, new Map<string, Issue[]>())
 	);
 
-	$: pendingCount = $sessionIssues.filter((i) => !i.skipped && !i.applied).length;
-	$: applicableCount = $sessionIssues.filter((i) => !i.skipped && !i.applied && i.suggested_fix).length;
-	$: appliedCount = $sessionIssues.filter((i) => i.applied).length;
-	$: totalCount = $sessionIssues.length;
+	const pendingCount = $derived($sessionIssues.filter((i) => !i.skipped && !i.applied).length);
+	const applicableCount = $derived($sessionIssues.filter((i) => !i.skipped && !i.applied && i.suggested_fix).length);
+	const appliedCount = $derived($sessionIssues.filter((i) => i.applied).length);
+	const totalCount = $derived($sessionIssues.length);
 
+	// Svelte 5: SvelteSet is reactive - no need for "x = x" hack
 	function toggleType(type: string) {
 		if (expandedTypes.has(type)) {
 			expandedTypes.delete(type);
 		} else {
 			expandedTypes.add(type);
 		}
-		expandedTypes = expandedTypes; // trigger reactivity
 	}
 
 	function toggleSkip(issue: Issue) {
@@ -78,12 +80,10 @@
 		const content = format === 'markdown' ? exportAsMarkdown() : exportAsCsv();
 		const filename = `issues-${new Date().toISOString().slice(0, 10)}.${format === 'markdown' ? 'md' : 'csv'}`;
 
-		// Use clipboard for now (could use Tauri file dialog for save)
 		try {
 			await navigator.clipboard.writeText(content);
 			alert(`Copied ${format.toUpperCase()} to clipboard!\n\nFilename suggestion: ${filename}`);
 		} catch {
-			// Fallback: show in console
 			console.log(`=== ${filename} ===\n${content}`);
 			alert('Export copied to console (clipboard failed)');
 		}

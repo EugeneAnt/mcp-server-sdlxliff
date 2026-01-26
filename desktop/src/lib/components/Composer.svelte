@@ -2,7 +2,9 @@
 	import { inputValue, isLoading } from '$lib/stores/chat';
 	import { sendMessage } from '$lib/services/chatService';
 
-	let textareaEl: HTMLTextAreaElement;
+	// Svelte 5: $state() for DOM reference
+	let textareaEl = $state<HTMLTextAreaElement | null>(null);
+
 	const lineHeight = 24;
 	const maxLines = 10;
 	const minHeight = lineHeight + 8; // 1 line + minimal padding
@@ -22,9 +24,12 @@
 		textareaEl.style.height = `${newHeight}px`;
 	}
 
-	$: if (textareaEl && $inputValue !== undefined) {
-		setTimeout(autoResize, 0);
-	}
+	// Svelte 5: $effect() for side effects (auto-resize on input change)
+	$effect(() => {
+		if (textareaEl && $inputValue !== undefined) {
+			setTimeout(autoResize, 0);
+		}
+	});
 </script>
 
 <div class="p-4 bg-zinc-800 border-t border-zinc-700">

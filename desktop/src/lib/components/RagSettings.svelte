@@ -9,25 +9,32 @@
 	} from '$lib/services/ragService';
 	import { checkOllama, checkOllamaModel, installOllama, startOllama, pullOllamaModel as pullModel } from '$lib/rag';
 
-	let showSettings = false;
-	let localOpenaiKey = '';
-	let saving = false;
-	let pullingModel = false;
-	let ollamaRunning = false;
-	let modelInstalled = false;
+	// Svelte 5: $state() for local reactive state
+	let showSettings = $state(false);
+	let localOpenaiKey = $state('');
+	let saving = $state(false);
+	let pullingModel = $state(false);
+	let ollamaRunning = $state(false);
+	let modelInstalled = $state(false);
+	let installing = $state(false);
+	let starting = $state(false);
+	let statusMessage = $state('');
+
 	// New model for better multilingual support
 	const OLLAMA_MODEL = 'mxbai-embed-large';
-	let installing = false;
-	let starting = false;
-	let statusMessage = '';
 
-	// Sync local state
-	$: localOpenaiKey = $openaiApiKey;
+	// Svelte 5: $effect() replaces $: for side effects
+	// Sync local state with store
+	$effect(() => {
+		localOpenaiKey = $openaiApiKey;
+	});
 
 	// Check Ollama status when settings open
-	$: if (showSettings && $ragUseOllama) {
-		refreshOllamaStatus();
-	}
+	$effect(() => {
+		if (showSettings && $ragUseOllama) {
+			refreshOllamaStatus();
+		}
+	});
 
 	async function refreshOllamaStatus() {
 		ollamaRunning = await checkOllama();

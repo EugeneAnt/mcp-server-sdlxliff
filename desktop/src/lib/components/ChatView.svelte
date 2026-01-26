@@ -1,13 +1,16 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { displayMessages, isLoading, shouldAutoScroll, inputValue } from '$lib/stores/chat';
 	import { mcpConnected, mcpError } from '$lib/stores/mcp';
 	import { selectedPaths } from '$lib/stores/files';
 	import { sendMessage } from '$lib/services/chatService';
 	import QuickActions from './QuickActions.svelte';
 
-	let messagesContainer: HTMLDivElement;
-	let lastMessageCount = 0;
+	// Svelte 5: $state() for local reactive state
+	let messagesContainer = $state<HTMLDivElement | null>(null);
+	let lastMessageCount = $state(0);
+
+	// Svelte 5: $derived() for computed values
+	const hasFile = $derived($selectedPaths.length > 0);
 
 	function handleScroll() {
 		if (!messagesContainer) return;
@@ -22,23 +25,25 @@
 		}
 	}
 
-	// Auto-scroll on new messages
-	$: if (messagesContainer && $displayMessages.length > lastMessageCount) {
-		lastMessageCount = $displayMessages.length;
-		if ($shouldAutoScroll) {
-			setTimeout(() => {
-				messagesContainer.scrollTop = messagesContainer.scrollHeight;
-			}, 0);
+	// Svelte 5: $effect() for side effects (auto-scroll on new messages)
+	$effect(() => {
+		if (messagesContainer && $displayMessages.length > lastMessageCount) {
+			lastMessageCount = $displayMessages.length;
+			if ($shouldAutoScroll) {
+				setTimeout(() => {
+					if (messagesContainer) {
+						messagesContainer.scrollTop = messagesContainer.scrollHeight;
+					}
+				}, 0);
+			}
 		}
-	}
+	});
 
 	// Handle quick action selection
 	function handleQuickAction(event: CustomEvent<string>) {
 		inputValue.set(event.detail);
 		sendMessage();
 	}
-
-	$: hasFile = $selectedPaths.length > 0;
 </script>
 
 <div bind:this={messagesContainer} onscroll={handleScroll} class="flex-1 overflow-y-auto p-4">
