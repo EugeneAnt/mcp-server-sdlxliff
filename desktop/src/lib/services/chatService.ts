@@ -37,6 +37,7 @@ import {
 	ragEnabled
 } from '$lib/stores/settings';
 import {
+	sessionIssues,
 	addIssue,
 	addIssues,
 	clearIssues,
@@ -74,10 +75,17 @@ const systemPrompt = `You are an SDLXLIFF translation assistant. You help users 
 
 ## Workflow
 
-1. **Check translations**: Use qa_check_sdlxliff and/or read segments
-2. **Identify issues**: Use add_issue_to_report with suggested_fix (FULL target text with tags)
-3. **Discuss with user**: Refine fixes as needed (updates existing issue for same segment)
+1. **QA Check** (optional): User runs qa_check_sdlxliff → regex-based issues detected
+2. **Review request**: User asks to check meaning/style/etc → QA results are injected as context
+3. **Address issues**: Read segments, create fixes via add_issue_to_report (include suggested_fix)
 4. **Apply edits**: When user asks to apply/save, call apply_pending_fixes
+
+## QA Context Injection
+
+When QA has been run, subsequent messages may include "[QA Check Results]" context listing detected issues.
+- **For review/fix requests**: Address listed QA issues with actual fixes (suggested_fix) + find additional issues
+- **For info requests** (statistics, list segments): QA context is FYI only, proceed with the request
+- QA issues are observations; your add_issue_to_report calls create actionable fixes
 
 ## Important: How to Report Issues
 
@@ -557,6 +565,45 @@ export async function applyAllFixes(): Promise<void> {
 }
 
 /**
+ * Get QA-detected issues formatted as context for LLM injection.
+ * Only includes non-skipped, non-applied issues from qa_check tool.
+ * Returns empty string if no relevant QA issues exist.
+ */
+function getQaContextForInjection(): string {
+	const issues = get(sessionIssues);
+
+	// Filter to QA-detected, non-skipped, non-applied issues
+	const qaIssues = issues.filter(
+		(i) => i.source_tool === 'qa_check' && !i.skipped && !i.applied
+	);
+
+	if (qaIssues.length === 0) return '';
+
+	// Group by segment_id for readability
+	const bySegment = new Map<string, Issue[]>();
+	for (const issue of qaIssues) {
+		const list = bySegment.get(issue.segment_id) || [];
+		list.push(issue);
+		bySegment.set(issue.segment_id, list);
+	}
+
+	// Format as concise context
+	const lines: string[] = [];
+	for (const [segId, segIssues] of bySegment) {
+		const issueDescriptions = segIssues.map((i) => {
+			const type = i.issue_type.replace(/^qa_/, '');
+			return `${type}: ${i.message}`;
+		});
+		lines.push(`- Segment ${segId}: ${issueDescriptions.join('; ')}`);
+	}
+
+	return `[QA Check Results - Address these issues in your response:
+${lines.join('\n')}]
+
+`;
+}
+
+/**
  * Auto-populate issues from QA tool response
  */
 function autoPopulateIssuesFromQA(resultText: string): void {
@@ -609,12 +656,15 @@ export async function sendMessage(): Promise<void> {
 		contextPrefix = `[Working with ${paths.length} file${paths.length > 1 ? 's' : ''}:\n${paths.map((p) => `- ${p}`).join('\n')}]\n\n`;
 	}
 
+	// Inject QA results as guidance for LLM (non-skipped, non-applied QA issues)
+	const qaContext = getQaContextForInjection();
+
 	// Clear previous RAG context (will be populated if Claude calls rag_search)
 	ragLastContext.set([]);
 	ragLastSearchResults.set(0);
 	ragInjectedContext.set('');
 
-	const messageWithContext = contextPrefix + userMessage;
+	const messageWithContext = contextPrefix + qaContext + userMessage;
 
 	displayMessages.addUserMessage(userMessage);
 	conversationMessages.update((msgs) => [
