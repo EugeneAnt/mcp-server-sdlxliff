@@ -8,11 +8,12 @@
 		ragLastSearchResults,
 		ragIndexing,
 		ragSearchCount,
-		ragTokensUsed
+		ragTokensUsed,
+		ragError
 	} from '$lib/services/ragService';
 </script>
 
-{#if $sessionUsage.inputTokens > 0 || $currentModelDisplayName || ($ragEnabled && $ragInitialized)}
+{#if $sessionUsage.inputTokens > 0 || $currentModelDisplayName || ($ragEnabled && ($ragInitialized || $ragError))}
 	<div class="flex items-center justify-between px-4 py-1.5 bg-zinc-800/30 border-b border-zinc-700/50 text-xs font-mono">
 		<div class="flex items-center gap-4 text-zinc-500">
 			{#if $currentModelDisplayName}
@@ -35,16 +36,22 @@
 					Cache write: {$sessionUsage.cacheWriteTokens.toLocaleString()}
 				</span>
 			{/if}
-			{#if $ragEnabled && $ragInitialized}
-				<span title="RAG semantic search - segments indexed for search" class="text-purple-400">
-					{#if $ragIndexing}
-						RAG: <span class="animate-pulse">indexing...</span>
-					{:else if $ragIndexedSegments > 0}
-						RAG: {$ragIndexedSegments} indexed
-					{:else}
-						RAG: ready
-					{/if}
-				</span>
+			{#if $ragEnabled && ($ragInitialized || $ragError)}
+				{#if $ragError}
+					<span title={$ragError} class="text-red-400 cursor-help">
+						RAG: error
+					</span>
+				{:else}
+					<span title="RAG semantic search - segments indexed for search" class="text-purple-400">
+						{#if $ragIndexing}
+							RAG: <span class="animate-pulse">indexing...</span>
+						{:else if $ragIndexedSegments > 0}
+							RAG: {$ragIndexedSegments} indexed
+						{:else}
+							RAG: ready
+						{/if}
+					</span>
+				{/if}
 				{#if $ragSearchCount > 0}
 					<span title="RAG searches performed this session" class="text-purple-300">
 						{$ragSearchCount} search{$ragSearchCount !== 1 ? 'es' : ''} (~{$ragTokensUsed.toLocaleString()} tokens)

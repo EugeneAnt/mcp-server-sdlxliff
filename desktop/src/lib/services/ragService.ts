@@ -10,6 +10,7 @@ import {
 	ragStats,
 	ragClear,
 	computeHash,
+	checkOllama,
 	type Segment,
 	type SearchResult,
 	type SearchMode
@@ -57,6 +58,13 @@ export async function initializeRag(): Promise<void> {
 		}
 
 		if (settings.enabled) {
+			// Validate Ollama is running before initializing
+			if (settings.useOllama) {
+				const ollamaRunning = await checkOllama();
+				if (!ollamaRunning) {
+					throw new Error('Ollama is not running. Start Ollama or switch to OpenAI.');
+				}
+			}
 			await ragInit(settings.openaiKey ?? undefined, settings.useOllama);
 			ragInitialized.set(true);
 			ragError.set('');
@@ -81,8 +89,17 @@ export async function setRagEnabled(enabled: boolean): Promise<void> {
 			throw new Error('OpenAI API key required when not using Ollama');
 		}
 
+		// Validate Ollama is running before enabling
+		if (useOllama) {
+			const ollamaRunning = await checkOllama();
+			if (!ollamaRunning) {
+				throw new Error('Ollama is not running. Start Ollama or switch to OpenAI.');
+			}
+		}
+
 		await ragInit(openaiKey || undefined, useOllama);
 		ragInitialized.set(true);
+		ragError.set('');
 	} else {
 		ragInitialized.set(false);
 	}
@@ -109,8 +126,18 @@ export async function updateRagProvider(useOllama: boolean, openaiKey?: string):
 
 	// Re-initialize if enabled
 	if (enabled) {
+		// Validate Ollama is running before reinitializing
+		if (useOllama) {
+			const ollamaRunning = await checkOllama();
+			if (!ollamaRunning) {
+				ragError.set('Ollama is not running. Start Ollama or switch to OpenAI.');
+				ragInitialized.set(false);
+				return;
+			}
+		}
 		await ragInit(openaiKey ?? get(openaiApiKey) ?? undefined, useOllama);
 		ragInitialized.set(true);
+		ragError.set('');
 	}
 }
 
@@ -126,6 +153,14 @@ export async function indexFile(filePath: string): Promise<number> {
 	ragError.set('');
 
 	try {
+		// Validate Ollama is still running if using Ollama
+		if (get(ragUseOllama)) {
+			const ollamaRunning = await checkOllama();
+			if (!ollamaRunning) {
+				throw new Error('Ollama stopped. Restart Ollama to continue using RAG.');
+			}
+		}
+
 		const client = getMcpClient();
 		if (!client) {
 			throw new Error('MCP not connected');
