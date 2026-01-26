@@ -610,9 +610,29 @@ def _check_spelling_yandex(
     # IGNORE_CAPITALIZATION = 512 (ignore case errors)
     options = 2 + 4  # IGNORE_DIGITS + IGNORE_URLS
 
-    # Sanitize text: replace special Unicode punctuation that breaks Yandex API
-    # «» (Russian quotes) and — (em-dash) cause empty responses
-    sanitized_target = target.replace('«', '"').replace('»', '"').replace('—', '-').replace('–', '-')
+    # Sanitize text: replace special Unicode characters that break Yandex API
+    # Many Unicode punctuation and space characters cause empty responses
+    sanitized_target = target
+
+    # Quotes (various styles) -> ASCII quotes
+    # « » „ " ‟ " ‹ › ' ' ‚ '
+    quote_chars = '\u00AB\u00BB\u201E\u201C\u201F\u201D\u2039\u203A\u2018\u2019\u201A\u2032'
+    for char in quote_chars:
+        sanitized_target = sanitized_target.replace(char, '"')
+
+    # Dashes (em-dash, en-dash, figure dash, minus sign, etc.) -> ASCII hyphen
+    # — – ‒ − ‐
+    dash_chars = '\u2014\u2013\u2012\u2212\u2010'
+    for char in dash_chars:
+        sanitized_target = sanitized_target.replace(char, '-')
+
+    # Special spaces (non-breaking, thin, zero-width, etc.) -> regular space
+    space_chars = '\u00A0\u2009\u200A\u200B\u202F\u2007\u2008'
+    for char in space_chars:
+        sanitized_target = sanitized_target.replace(char, ' ')
+
+    # Ellipsis -> three dots (this one actually works, but normalize anyway)
+    sanitized_target = sanitized_target.replace('\u2026', '...')
 
     # Prepare request
     params = urllib.parse.urlencode({
