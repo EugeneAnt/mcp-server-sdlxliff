@@ -325,16 +325,59 @@ async fn run_chat_stream(
         }
     }
 
-    let response = client
-        .post("https://api.anthropic.com/v1/messages")
-        .header("x-api-key", &api_key)
-        .header("anthropic-version", "2023-06-01")
-        .header("anthropic-beta", "prompt-caching-2024-07-31")
-        .header("content-type", "application/json")
-        .body(body.to_string())
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
+    // Retry logic with exponential backoff for transient errors (529 Overloaded, 503 Service Unavailable)
+    let max_retries = 3;
+    let mut attempts = 0;
+    let mut retry_delay = std::time::Duration::from_secs(1);
+
+    let response = loop {
+        let result = client
+            .post("https://api.anthropic.com/v1/messages")
+            .header("x-api-key", &api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("anthropic-beta", "prompt-caching-2024-07-31")
+            .header("content-type", "application/json")
+            .body(body.to_string())
+            .send()
+            .await;
+
+        match result {
+            Ok(resp) => {
+                let status = resp.status();
+                // Retry on 529 (Overloaded) or 503 (Service Unavailable)
+                if status.as_u16() == 529 || status.as_u16() == 503 {
+                    attempts += 1;
+                    if attempts <= max_retries {
+                        log::warn!(
+                            "API returned {} (attempt {}/{}), retrying in {:?}...",
+                            status, attempts, max_retries, retry_delay
+                        );
+                        tokio::time::sleep(retry_delay).await;
+                        retry_delay *= 2; // Exponential backoff
+                        continue;
+                    } else {
+                        let error_body = resp.text().await.unwrap_or_default();
+                        return Err(format!("API error {} after {} retries: {}", status, max_retries, error_body));
+                    }
+                }
+                break resp;
+            }
+            Err(e) => {
+                attempts += 1;
+                if attempts <= max_retries {
+                    log::warn!(
+                        "Request failed (attempt {}/{}): {}, retrying in {:?}...",
+                        attempts, max_retries, e, retry_delay
+                    );
+                    tokio::time::sleep(retry_delay).await;
+                    retry_delay *= 2;
+                    continue;
+                } else {
+                    return Err(format!("Request failed: {} (after {} retries)", e, max_retries));
+                }
+            }
+        }
+    };
 
     if !response.status().is_success() {
         let status = response.status();
