@@ -12,7 +12,7 @@
 	import { initializeApp, cleanupApp, setScrollCallbacks } from '$lib/services/chatService';
 	import { showApiKeyInput } from '$lib/stores/settings';
 	import { sessionIssues } from '$lib/stores/issues';
-
+	
 	let chatView: ChatView;
 	let toolsPanel: ToolsPanel;
 
@@ -36,7 +36,7 @@
 	<StatusLine />
 	<FileSelector />
 
-	<main class="flex-1 flex overflow-hidden">
+	<main class="flex-1 flex overflow-hidden relative">
 		{#if $showApiKeyInput}
 			<ApiKeyDialog />
 		{:else}
@@ -46,10 +46,10 @@
 					<Composer />
 				</div>
 				<ToolsPanel bind:this={toolsPanel} />
-				{#if $sessionIssues.length > 0}
-					<IssuesPanel />
-				{/if}
+				<!-- Always mount IssuesPanel to avoid render freeze when issues arrive -->
+				<IssuesPanel hidden={$sessionIssues.length === 0} />
 			</div>
+
 		{/if}
 	</main>
 </div>

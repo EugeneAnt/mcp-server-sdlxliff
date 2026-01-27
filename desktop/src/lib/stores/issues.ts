@@ -89,14 +89,70 @@ export function addIssue(issue: Omit<Issue, 'id' | 'timestamp' | 'skipped' | 'ap
 
 /**
  * Add multiple issues at once (used for QA auto-populate)
+ * Optimized: single store update instead of N updates
  */
-export function addIssues(issues: Omit<Issue, 'id' | 'timestamp' | 'skipped' | 'applied'>[]): number {
+export function addIssues(newIssues: Omit<Issue, 'id' | 'timestamp' | 'skipped' | 'applied'>[]): number {
+	if (newIssues.length === 0) return 0;
+
+	console.time('addIssues batch');
 	let added = 0;
-	for (const issue of issues) {
-		const before = get(sessionIssues).length;
-		addIssue(issue);
-		if (get(sessionIssues).length > before) added++;
-	}
+
+	sessionIssues.update((existingIssues) => {
+		const result = [...existingIssues];
+
+		for (const issue of newIssues) {
+			let existingIndex = -1;
+
+			if (issue.suggested_fix) {
+				// Has a fix: dedupe by segment_id only (one actionable fix per segment)
+				existingIndex = result.findIndex(
+					(i) =>
+						i.segment_id === issue.segment_id &&
+						i.suggested_fix && // also has a fix
+						!i.skipped &&
+						!i.applied
+				);
+			} else {
+				// No fix (observation only): dedupe by segment_id + issue_type
+				existingIndex = result.findIndex(
+					(i) =>
+						i.segment_id === issue.segment_id &&
+						i.issue_type === issue.issue_type &&
+						!i.skipped &&
+						!i.applied
+				);
+			}
+
+			if (existingIndex !== -1) {
+				// Update existing issue
+				result[existingIndex] = {
+					...result[existingIndex],
+					issue_type: issue.issue_type,
+					message: issue.message,
+					suggested_fix: issue.suggested_fix ?? result[existingIndex].suggested_fix,
+					source: issue.source || result[existingIndex].source,
+					target: issue.target || result[existingIndex].target,
+					severity: issue.severity,
+					timestamp: Date.now()
+				};
+			} else {
+				// Add new issue
+				result.push({
+					...issue,
+					id: crypto.randomUUID(),
+					timestamp: Date.now(),
+					skipped: false,
+					applied: false
+				});
+				added++;
+			}
+		}
+
+		return result;
+	});
+
+	console.timeEnd('addIssues batch');
+	console.log(`Added ${added} new issues (${newIssues.length - added} deduplicated)`);
 	return added;
 }
 

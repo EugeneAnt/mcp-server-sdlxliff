@@ -140,7 +140,8 @@ export async function* streamChatWithTools(
 
 	try {
 		// Start the stream
-		await invoke('chat_stream', {
+		console.time('chat_stream:invoke');
+		const requestPayload = {
 			request: {
 				messages: rustMessages,
 				system_prompt: systemPrompt,
@@ -148,7 +149,10 @@ export async function* streamChatWithTools(
 				stream_id: streamId,
 				model: model
 			}
-		});
+		};
+		console.log(`chat_stream: ${rustMessages.length} messages, payload size: ${JSON.stringify(requestPayload).length} bytes`);
+		await invoke('chat_stream', requestPayload);
+		console.timeEnd('chat_stream:invoke');
 
 		// Yield events as they arrive
 		while (!done || events.length > 0) {
@@ -160,7 +164,10 @@ export async function* streamChatWithTools(
 					yield event;
 
 					// Execute the tool
+					console.time(`tool:${event.toolUse.name}`);
 					const result = await onToolCall(event.toolUse);
+					console.timeEnd(`tool:${event.toolUse.name}`);
+					console.log(`Tool ${event.toolUse.name} result size: ${result.length} bytes`);
 					yield { type: 'tool_result', content: result.slice(0, 500) + '...' };
 
 					// Continue the conversation with tool result

@@ -58,6 +58,11 @@ export class McpClient {
 		};
 
 		const message = JSON.stringify(request);
+
+		// Yield to event loop before blocking Tauri IPC call
+		// This ensures UI updates (spinners, etc.) render before the call blocks
+		await new Promise((resolve) => requestAnimationFrame(resolve));
+
 		const responseStr = await invoke<string>('mcp_request', { message });
 
 		const response: JsonRpcResponse = JSON.parse(responseStr);
@@ -127,10 +132,14 @@ export class McpClient {
 	}
 
 	async callTool(name: string, args: Record<string, unknown>): Promise<McpToolResult> {
+		console.log(`[MCP-Client] callTool: ${name} - sending request`);
+		console.time(`[MCP-Client] ${name}:sendRequest`);
 		const result = await this.sendRequest('tools/call', {
 			name,
 			arguments: args
 		});
+		console.timeEnd(`[MCP-Client] ${name}:sendRequest`);
+		console.log(`[MCP-Client] callTool: ${name} - got response`);
 		return result as McpToolResult;
 	}
 }
